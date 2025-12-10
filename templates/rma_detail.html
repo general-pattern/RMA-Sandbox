@@ -1,0 +1,782 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="rma-header">
+  <div class="rma-title">
+    <h2>{{ rma['rma_id']|rma_code }} - {{ rma['customer_name'] }}</h2>
+    <span class="status-badge status-{{ rma['status']|lower|replace(' ', '-') }}">{{ rma['status'] }}</span>
+    <a href="{{ url_for('view_rma_credit', rma_id=rma['rma_id']) }}" class="btn-secondary" style="margin-left: 15px;">
+      Credit
+    </a>
+  </div>
+  <div class="rma-actions">
+    <form action="{{ url_for('delete_rma', rma_id=rma['rma_id']) }}" method="post" class="inline-form"
+          onsubmit="return confirm('Delete this RMA?');">
+      <button type="submit" class="btn-danger">🗑️ Delete</button>
+    </form>
+  </div>
+</div>
+
+<div class="detail-column">
+
+  <!-- Status Update Card -->
+  <div class="card status-card">
+    <form method="post" action="{{ url_for('update_notes', rma_id=rma['rma_id']) }}" class="status-form">
+      <label>Update Status:</label>
+      <select name="status">
+        {% for s in status_options %}
+        <option value="{{ s }}" {% if rma['status'] == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" name="comment" placeholder="Comment (optional)">
+      <button type="submit" class="btn-primary">Update</button>
+    </form>
+  </div>
+
+  {% if not edit_mode %}
+  <!-- Slim age strip between status card and RMA info -->
+  <div class="age-strip">
+    <div class="age-chip">
+      <div class="age-chip-label">⏱️ In Our System</div>
+      <div class="age-chip-value">
+        {{ rma['date_opened']|time_active(rma['date_closed'], rma['status']) }}
+      </div>
+    </div>
+
+    <div class="age-chip">
+      <div class="age-chip-label">📅 Customer RMA Age</div>
+      <div class="age-chip-value">
+        {% if rma['customer_date_opened'] %}
+          {{ rma['customer_date_opened']|time_active(rma['date_closed'], rma['status']) }}
+        {% else %}
+          <span class="age-chip-empty">Not specified</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Header Card -->
+  <div class="card {% if edit_mode %}card-editing{% endif %}">
+    <div class="card-header">
+      <h3>RMA Information</h3>
+      {% if not edit_mode %}
+      <a href="{{ url_for('view_rma', rma_id=rma['rma_id'], edit='1') }}" class="btn-icon">✎</a>
+      {% else %}
+      <a href="{{ url_for('view_rma', rma_id=rma['rma_id']) }}" class="btn-icon">🗙</a>
+      {% endif %}
+    </div>
+    
+    {% if edit_mode %}
+    {# ================= EDIT MODE ================= #}
+    <form method="post" action="{{ url_for('edit_rma_inline', rma_id=rma['rma_id']) }}">
+      <div class="info-grid">
+        <!-- Editable: Customer -->
+        <div class="info-item editable-field">
+          <span class="info-label">Customer *</span>
+          <select name="customer_id" required class="edit-input">
+            {% for c in customers %}
+            <option value="{{ c['customer_id'] }}" {% if c['customer_id'] == rma['customer_id'] %}selected{% endif %}>{{ c['customer_name'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        
+        <!-- Editable: Return Type -->
+        <div class="info-item editable-field">
+          <span class="info-label">Return Type</span>
+          <select name="return_type" class="edit-input">
+            <option value="TBD" {% if rma['return_type'] == 'TBD' %}selected{% endif %}>TBD</option>
+            <option value="Credit" {% if rma['return_type'] == 'Credit' %}selected{% endif %}>Credit</option>
+            <option value="Replacement" {% if rma['return_type'] == 'Replacement' %}selected{% endif %}>Replacement</option>
+            <option value="Repair and Return" {% if rma['return_type'] == 'Repair and Return' %}selected{% endif %}>Repair and Return</option>
+          </select>
+        </div>
+        
+        <!-- Non-editable: Created By -->
+        <div class="info-item">
+          <span class="info-label">Created By</span>
+          <span class="info-value">{{ rma['created_by_name'] or '-' }}</span>
+        </div>
+        
+        <!-- Time Tracking (still inside card in edit mode) -->
+        <div class="info-item">
+          <span class="info-label">⏱️ In Our System</span>
+          <span class="info-value" style="font-weight: 600;">{{ rma['date_opened']|time_active(rma['date_closed'], rma['status']) }}</span>
+        </div>
+        
+        <div class="info-item">
+          <span class="info-label">📅 Customer RMA Age</span>
+          {% if rma['customer_date_opened'] %}
+          <span class="info-value" style="font-weight: 600;">{{ rma['customer_date_opened']|time_active(rma['date_closed'], rma['status']) }}</span>
+          {% else %}
+          <span class="info-value" style="color: var(--gray-400);">Not specified</span>
+          {% endif %}
+        </div>
+      </div>
+      
+      <!-- Multiple Owners Section (Non-editable in edit mode) -->
+      <div class="info-item" style="grid-column: 1 / -1; border-top: 2px solid var(--gray-200); margin-top: 10px; padding-top: 15px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+          <span class="info-label" style="font-size: 16px; font-weight: 600;">Assigned Owners</span>
+        </div>
+        
+        {% if assigned_owners %}
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            {% for ao in assigned_owners %}
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background-color: {% if ao['is_primary'] %}#dbeafe{% else %}var(--gray-50){% endif %}; border-radius: 6px; border-left: 4px solid {% if ao['is_primary'] %}var(--primary){% else %}var(--gray-300){% endif %};">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-weight: 600; color: var(--gray-800);">{{ ao['full_name'] }}</span>
+                {% if ao['is_primary'] %}
+                <span style="background-color: #1e40af; color: white; padding: 2px 8px; border-radius: 3px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;">PRIMARY</span>
+                {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p style="color: var(--gray-500); font-style: italic;">No owners assigned yet.</p>
+        {% endif %}
+      </div>
+      
+      <div class="info-grid" style="margin-top: 15px;">
+        {% if rma['status'] in ['Closed', 'Rejected'] %}
+        <div class="info-item">
+          <span class="info-label">{{ 'Closed' if rma['status'] == 'Closed' else 'Rejected' }}</span>
+          <span class="info-value">
+            {{ rma['date_closed']|short_date }} by {{ rma['closed_by'] }}
+          </span>
+        </div>
+        {% endif %}
+        
+        <!-- Editable: Credit Memo # -->
+        <div class="info-item editable-field">
+          <span class="info-label">Credit Memo #</span>
+          <input type="text" name="credit_memo" value="{{ rma['credit_memo_number'] or '' }}" placeholder="Optional" class="edit-input">
+        </div>
+        
+        <!-- Non-editable: Acknowledged -->
+        <div class="info-item">
+          <span class="info-label">Acknowledged</span>
+          <span class="info-value">
+            {% if rma['acknowledged'] %}
+              <span class="ack-yes">✓ Yes</span>
+              {% if rma['acknowledged_on'] %}
+              <span class="notes-meta">({{ rma['acknowledged_on']|short_date }})</span>
+              {% endif %}
+            {% else %}
+              <span class="ack-no">✗ No</span>
+            {% endif %}
+          </span>
+        </div>
+        
+        <!-- Non-editable: Credit Approved -->
+        <div class="info-item">
+          <span class="info-label">Credit Approved</span>
+          <span class="info-value">
+            {% if rma['credit_approved'] %}
+              <span class="ack-yes">✓ Yes</span>
+              {% if rma['credit_approved_on'] %}
+              <span class="notes-meta">({{ rma['credit_approved_on']|short_date }} by {{ rma['credit_approved_by'] }})</span>
+              {% endif %}
+            {% else %}
+              <span class="ack-no">✗ No</span>
+            {% endif %}
+          </span>
+        </div>
+      </div>
+      
+      <!-- Editable: Customer Complaint -->
+      <div class="info-section editable-field" style="margin-top: 15px;">
+        <h4>Customer Complaint</h4>
+        <textarea name="complaint" rows="3" class="edit-textarea">{{ rma['customer_complaint_desc'] or '' }}</textarea>
+      </div>
+      
+      <!-- Editable: Internal Notes -->
+      <div class="info-section editable-field">
+        <h4>Internal Notes</h4>
+        <textarea name="internal_notes" rows="3" class="edit-textarea">{{ rma['internal_notes'] or '' }}</textarea>
+        {% if rma['notes_last_modified'] %}
+  <div class="notes-meta">
+    Last modified: {{ rma['notes_last_modified']| dt_display | safe }} by {{ rma['notes_modified_by'] }}
+  </div>
+{% endif %}
+
+      </div>
+      
+      <!-- Save/Cancel Buttons -->
+      <div class="form-actions" style="margin-top: 20px;">
+        <button type="submit" class="btn-primary">💾 Save Changes</button>
+        <a href="{{ url_for('view_rma', rma_id=rma['rma_id']) }}" class="btn-secondary">Cancel</a>
+      </div>
+    </form>
+    
+    {% else %}
+
+
+    {# ================= VIEW MODE ================= #}
+    <div class="info-grid">
+      <div class="info-item">
+        <span class="info-label">Customer</span>
+        <span class="info-value">{{ rma['customer_name'] }}</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Return Type</span>
+        <span class="info-value">{{ rma['return_type'] or '-' }}</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Created By</span>
+        <span class="info-value">{{ rma['created_by_name'] or '-' }}</span>
+      </div>
+    </div>
+
+    <!-- Assigned Owners -->
+    <div class="info-item assigned-owners-block">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <span class="info-label" style="font-size: 16px; font-weight: 600;">Assigned Owners</span>
+        <button type="button" onclick="document.getElementById('add-owner-form').style.display='block'" class="btn-secondary" style="padding: 6px 12px; font-size: 13px;">
+          ➕ Add Owner
+        </button>
+      </div>
+      
+      {% if assigned_owners %}
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          {% for ao in assigned_owners %}
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background-color: {% if ao['is_primary'] %}#dbeafe{% else %}var(--gray-50){% endif %}; border-radius: 6px; border-left: 4px solid {% if ao['is_primary'] %}var(--primary){% else %}var(--gray-300){% endif %};">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-weight: 600; color: var(--gray-800);">{{ ao['full_name'] }}</span>
+              {% if ao['is_primary'] %}
+              <span style="background-color: #1e40af; color: white; padding: 2px 8px; border-radius: 3px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;">PRIMARY</span>
+              {% endif %}
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <form method="POST" action="{{ url_for('remove_rma_owner', rma_id=rma['rma_id'], owner_id=ao['user_id']) }}" style="display: inline;" onsubmit="return confirm('Remove this owner?');">
+                <button type="submit" class="btn-secondary" style="padding: 4px 10px; font-size: 12px; color: #dc2626;">
+                  Remove
+                </button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p style="color: var(--gray-500); font-style: italic;">No owners assigned yet.</p>
+      {% endif %}
+      
+      <!-- Add Owner Form (hidden by default) -->
+      <div id="add-owner-form" style="display: none; margin-top: 15px; padding: 15px; background-color: #f0f9ff; border-radius: 6px; border: 2px solid var(--primary);">
+        <form method="POST" action="{{ url_for('update_owners', rma_id=rma['rma_id']) }}">
+          <div style="display: flex; gap: 10px; align-items: flex-end;">
+            <div style="flex: 1;">
+              <label style="display: block; margin-bottom: 5px; font-weight: 600; color: var(--gray-700);">Select Owners</label>
+              <div style="border: 1px solid var(--gray-300); border-radius: 4px; padding: 10px; max-height: 150px; overflow-y: auto;">
+                {% for o in owners %}
+                <label style="display: flex; align-items: center; padding: 5px; cursor: pointer;">
+                  <input type="checkbox" name="owner_ids" value="{{ o['user_id'] }}" style="width: auto; margin-right: 8px;">
+                  <span>{{ o['full_name'] }}</span>
+                </label>
+                {% endfor %}
+              </div>
+            </div>
+            <button type="submit" class="btn-primary" style="padding: 8px 16px;">Add</button>
+            <button type="button" onclick="document.getElementById('add-owner-form').style.display='none'" class="btn-secondary" style="padding: 8px 16px;">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+        
+    {% if rma['status'] in ['Closed', 'Rejected'] %}
+    <div class="info-item">
+      <span class="info-label">{{ 'Closed' if rma['status'] == 'Closed' else 'Rejected' }}</span>
+      <span class="info-value">
+        {{ rma['date_closed']|short_date }} by {{ rma['closed_by'] }}
+      </span>
+    </div>
+    {% endif %}
+    
+    <div class="info-item">
+      <span class="info-label">Credit Memo #</span>
+      <span class="info-value">{{ rma['credit_memo_number'] or '-' }}</span>
+    </div>
+
+    <!-- Acknowledged box -->
+    <div class="info-item">
+      <span class="info-label">Acknowledged</span>
+      <span class="info-value">
+        {% if rma['acknowledged'] %}
+          <span class="ack-yes">✓ Yes</span>
+          {% if rma['acknowledged_on'] %}
+          <span class="notes-meta">({{ rma['acknowledged_on']|short_date }})</span>
+          {% endif %}
+        {% else %}
+          <span class="ack-no">✗ No</span>
+
+          {# show the button if there is at least one assigned owner #}
+          {% if assigned_owners and assigned_owners|length > 0 %}
+          <form method="post"
+                action="{{ url_for('acknowledge_rma', rma_id=rma['rma_id']) }}"
+                class="inline-form"
+                style="display:inline;">
+            <button type="submit"
+                    class="btn-sm btn-secondary"
+                    style="margin-left:6px;">
+              Mark Acknowledged
+            </button>
+          </form>
+          {% endif %}
+        {% endif %}
+      </span>
+    </div>
+    
+    <!-- Credit Approved box -->
+    <div class="info-item">
+      <span class="info-label">Credit Approved</span>
+      <span class="info-value">
+        {% if rma['credit_approved'] %}
+          <span class="ack-yes">✓ Yes</span>
+          {% if rma['credit_approved_on'] %}
+          <span class="notes-meta">({{ rma['credit_approved_on']|short_date }} by {{ rma['credit_approved_by'] }})</span>
+          {% endif %}
+        {% else %}
+          <span class="ack-no">✗ No</span>
+        {% endif %}
+        <form method="post"
+              action="{{ url_for('approve_credit', rma_id=rma['rma_id']) }}"
+              class="inline-form"
+              style="display:inline;">
+          <button type="submit"
+                  class="btn-sm btn-secondary"
+                  style="margin-left:6px;">
+            {% if rma['credit_approved'] %}Remove Approval{% else %}Approve Credit{% endif %}
+          </button>
+        </form>
+      </span>
+    </div>
+
+    <div class="info-section">
+      <h4>Customer Complaint</h4>
+      <div class="text-block">{{ rma['customer_complaint_desc'] or 'No complaint.' }}</div>
+    </div>
+    <div class="info-section">
+      <div class="notes-header">
+        <h4>Internal Notes</h4>
+        {% if notes_history %}
+        <a href="{{ url_for('view_rma', rma_id=rma['rma_id'], notes_history='1') }}" class="btn-sm btn-secondary">📜 History ({{ notes_history|length }})</a>
+        {% endif %}
+      </div>
+      <div class="text-block">{{ rma['internal_notes'] or 'No notes.' }}</div>
+      {% if rma['notes_last_modified'] %}
+      <div class="notes-meta">Last modified: {{ rma['notes_last_modified'] }} by {{ rma['notes_modified_by'] }}</div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>  {# end header card #}
+
+  {% if show_notes_history and notes_history %}
+  <div class="card">
+    <div class="card-header">
+      <h3>📜 Notes History</h3>
+      <a href="{{ url_for('view_rma', rma_id=rma['rma_id']) }}" class="btn-icon">🗙</a>
+    </div>
+    {% for note in notes_history %}
+    <div class="history-item">
+      <div class="history-meta"><strong>{{ note['modified_by'] }}</strong> - {{ note['modified_on']| dt_display | safe }}</div>
+      <div class="history-content">{{ note['notes_content'] }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Line Items -->
+  <div class="card">
+    <div class="card-header"><h3>Line Items</h3></div>
+    {% if lines %}
+    <table>
+      <thead>
+        <tr><th>Part #</th><th>Tool #</th><th>Description</th><th>Qty</th><th>PO/Lot</th><th>Cost</th><th>Disp.</th><th></th></tr>
+      </thead>
+      <tbody>
+{% for line in lines %}
+<tr>
+  {% if edit_line == line['rma_line_id'] %}
+    <form method="post" action="{{ url_for('edit_line', rma_id=rma['rma_id'], line_id=line['rma_line_id']) }}">
+      <td><input type="text" name="part_number" value="{{ line['part_number'] or '' }}" style="width:80px"></td>
+      <td><input type="text" name="tool_number" value="{{ line['tool_number'] or '' }}" style="width:80px"></td>
+      <td><input type="text" name="item_description" value="{{ line['item_description'] or '' }}" style="width:120px"></td>
+      <td><input type="number" name="qty_affected" value="{{ line['qty_affected'] or '' }}" style="width:50px"></td>
+      <td><input type="text" name="po_lot_number" value="{{ line['po_lot_number'] or '' }}" style="width:80px"></td>
+      <td><input type="number" step="0.01" name="total_cost" value="{{ line['total_cost'] or '' }}" style="width:70px"></td>
+      <td>-</td>
+      <td><button type="submit" class="btn-sm btn-primary">Save</button></td>
+    </form>
+  {% else %}
+    <td>{{ line['part_number'] or '-' }}</td>
+    <td>{{ line['tool_number'] or '-' }}</td>
+    <td>{{ line['item_description'] or '-' }}</td>
+    <td>{{ line['qty_affected'] or '-' }}</td>
+    <td>{{ line['po_lot_number'] or '-' }}</td>
+    <td>{{ line['total_cost']|currency }}</td>
+    <td>
+      {% if line['disposition'] %}
+        <span class="disposition-badge">{{ line['disposition'] }}</span>
+      {% else %}-{% endif %}
+    </td>
+    <td>
+      <a href="{{ url_for('view_rma', rma_id=rma['rma_id'], edit_line=line['rma_line_id']) }}">✎</a>
+<form method="post"
+      action="{{ url_for('delete_line_item',
+                         rma_id=rma['rma_id'],
+                         rma_line_id=line['rma_line_id']) }}"
+      class="inline-form"
+      onsubmit="return confirm('Delete?');">
+  <button type="submit" class="btn-link">🗑️</button>
+</form>
+
+    </td>
+  {% endif %}
+</tr>
+{% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    <h4 style="margin-top:15px;">Add Line</h4>
+    <form method="post" action="{{ url_for('add_line_item', rma_id=rma['rma_id']) }}" class="add-line-form">
+      <input type="text" name="part_number" placeholder="Part #" required>
+      <input type="text" name="tool_number" placeholder="Tool #">
+      <input type="text" name="item_description" placeholder="Description">
+      <input type="number" name="qty_affected" placeholder="Qty">
+      <input type="text" name="po_lot_number" placeholder="PO/Lot">
+      <input type="number" step="0.01" name="total_cost" placeholder="Cost">
+      <button type="submit" class="btn-primary">Add</button>
+    </form>
+  </div>
+
+{# =============== DISPOSITIONS ================= #}
+{% if lines %}
+  <div id="dispositions-anchor"></div>
+
+  {# VIEW MODE CARD #}
+  <div class="card" id="dispositions-view">
+    <div class="card-header">
+      <h3>Dispositions</h3>
+      <button type="button"
+              class="btn-icon"
+              id="dispo-edit-toggle"
+              title="Edit dispositions">
+        ✎
+      </button>
+    </div>
+
+    {% for line in lines %}
+    <div class="disposition-block">
+<h4>
+  <span style="font-weight:600;">Part #:</span> {{ line['part_number'] or '—' }}
+  &nbsp;/&nbsp;
+  <span style="font-weight:600;">Tool #:</span> {{ line['tool_number'] or '—' }}
+</h4>
+
+      <div class="info-grid">
+        <div class="info-item">
+          <span class="info-label">Disposition</span>
+          <span class="info-value">{{ line['disposition'] or '—' }}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Failure Code</span>
+          <span class="info-value">{{ line['failure_code'] or '—' }}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Qty Scrap</span>
+          <span class="info-value">{{ line['qty_scrap'] or '—' }}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Qty Rework</span>
+          <span class="info-value">{{ line['qty_rework'] or '—' }}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Qty Replace</span>
+          <span class="info-value">{{ line['qty_replace'] or '—' }}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Disposition By</span>
+          <span class="info-value">
+            {{ line['disposition_by_name'] or '—' }}
+          </span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Disposition Date</span>
+          <span class="info-value">
+            {% if line['date_dispositioned'] %}
+              {{ line['date_dispositioned']|dt_display | safe }}
+            {% else %}
+              <span class="text-muted">Not set</span>
+            {% endif %}
+          </span>
+        </div>
+      </div>
+
+      <div class="info-section">
+        <h4>Failure Description</h4>
+        <div class="text-block">{{ line['failure_description'] or '—' }}</div>
+      </div>
+      <div class="info-section">
+        <h4>Root Cause</h4>
+        <div class="text-block">{{ line['root_cause'] or '—' }}</div>
+      </div>
+      <div class="info-section">
+        <h4>Corrective Action</h4>
+        <div class="text-block">{{ line['corrective_action'] or '—' }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {# EDIT MODE CARD (hidden until pencil clicked) #}
+  <div class="card card-editing" id="dispositions-edit-card" style="display:none;">
+    <div class="card-header">
+      <h3>Edit Dispositions</h3>
+      <button type="button"
+              class="btn-icon"
+              id="dispo-edit-cancel"
+              title="Close edit mode">
+        🗙
+      </button>
+    </div>
+
+    {% for line in lines %}
+    <div class="info-section editable-field">
+      <h4>
+        {{ line['part_number'] or 'Item' }}
+        {% if line['item_description'] %} – {{ line['item_description'] }}{% endif %}
+      </h4>
+
+      <form method="post"
+            action="{{ url_for('add_disposition',
+                               rma_id=rma['rma_id'],
+                               line_id=line['rma_line_id']) }}">
+        <div class="disposition-grid">
+          <div class="form-group">
+            <label>Disposition</label>
+            <select name="disposition" class="edit-input">
+              <option value="">--</option>
+              <option value="Scrap" {% if line['disposition'] == 'Scrap' %}selected{% endif %}>Scrap</option>
+              <option value="Rework" {% if line['disposition'] == 'Rework' %}selected{% endif %}>Rework</option>
+              <option value="Replace" {% if line['disposition'] == 'Replace' %}selected{% endif %}>Replace</option>
+              <option value="Return to Customer" {% if line['disposition'] == 'Return to Customer' %}selected{% endif %}>
+                Return to Customer
+              </option>
+              <option value="No Fault Found" {% if line['disposition'] == 'No Fault Found' %}selected{% endif %}>
+                No Fault Found
+              </option>
+              <option value="Credit" {% if line['disposition'] == 'Credit' %}selected{% endif %}>Credit</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Failure Code</label>
+            <input type="text"
+                   name="failure_code"
+                   class="edit-input"
+                   value="{{ line['failure_code'] or '' }}">
+          </div>
+
+          <div class="form-group">
+            <label>Qty Scrap</label>
+            <input type="number"
+                   name="qty_scrap"
+                   class="edit-input"
+                   value="{{ line['qty_scrap'] or '' }}">
+          </div>
+
+          <div class="form-group">
+            <label>Qty Rework</label>
+            <input type="number"
+                   name="qty_rework"
+                   class="edit-input"
+                   value="{{ line['qty_rework'] or '' }}">
+          </div>
+
+          <div class="form-group">
+            <label>Qty Replace</label>
+            <input type="number"
+                   name="qty_replace"
+                   class="edit-input"
+                   value="{{ line['qty_replace'] or '' }}">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Failure Description</label>
+          <textarea name="failure_description"
+                    rows="2"
+                    class="edit-textarea">{{ line['failure_description'] or '' }}</textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Root Cause</label>
+          <textarea name="root_cause"
+                    rows="2"
+                    class="edit-textarea">{{ line['root_cause'] or '' }}</textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Corrective Action</label>
+          <textarea name="corrective_action"
+                    rows="2"
+                    class="edit-textarea">{{ line['corrective_action'] or '' }}</textarea>
+        </div>
+
+        <div class="form-actions" style="margin-top: 10px;">
+          <button type="submit" class="btn-primary btn-sm">Save</button>
+        </div>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="card" id="dispositions-view">
+    <div class="card-header">
+      <h3>Dispositions</h3>
+    </div>
+    <p class="text-muted">No line items to disposition yet.</p>
+  </div>
+{% endif %}
+
+
+  <!-- Status History -->
+  <div class="card">
+    <div class="card-header"><h3>Status History</h3></div>
+    {% if statuses %}
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Status</th>
+          <th>By</th>
+          <th>Comment</th>
+          <th></th>  {# actions column #}
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in statuses %}
+        <tr>
+          <td>{{ s['changed_on']| dt_display | safe }}</td>
+          <td>
+            <span class="status-badge status-{{ s['status']|lower|replace(' ', '-') }}">
+              {{ s['status'] }}
+            </span>
+          </td>
+          <td>{{ s['changed_byname'] or s['changed_by'] or '-' }}</td>
+          <td>{{ s['comment'] or '-' }}</td>
+          <td>
+            <form method="post"
+                  action="{{ url_for('delete_status_history',
+                                     rma_id=rma['rma_id'],
+                                     history_id=s['status_hist_id']) }}"
+                  class="inline-form"
+                  onsubmit="return confirm('Delete this status history entry?');">
+              <button type="submit" class="btn-link" title="Delete status history entry">🗑️</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+  <!-- Attachments -->
+  <div class="card">
+    <div class="card-header">
+      <h3>Attachments</h3>
+      <a href="{{ url_for('open_attachment_folder', rma_id=rma['rma_id']) }}" class="btn-secondary" style="font-size: 14px; padding: 6px 12px;">
+        📁 Open Folder
+      </a>
+    </div>
+
+    {% if attachments %}
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>File</th>
+          <th>Added By</th>
+          <th>Date</th>
+          <th></th>  <!-- actions -->
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in attachments %}
+        {% set fname = a['filename'] or a['file_path'].split('/')[-1].split('\\')[-1] %}
+        <tr>
+          <td>{{ a['attachment_type'] }}</td>
+          <td>
+            <a href="{{ url_for('open_specific_attachment', rma_id=rma['rma_id'], attachment_id=a['attachment_id']) }}" title="Click to open file">
+              {{ fname }}
+            </a>
+          </td>
+          <td>{{ a['added_by_name'] or a['added_by'] }}</td>
+          <td>{{ a['date_added']| dt_display | safe }}</td>
+          <td>
+            <form method="post"
+                  action="{{ url_for('delete_attachment', rma_id=rma['rma_id'], attachment_id=a['attachment_id']) }}"
+                  class="inline-form"
+                  onsubmit="return confirm('Delete this attachment?');">
+              <button type="submit" class="btn-link" title="Delete attachment">🗑️</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p style="padding: 15px; color: var(--gray-500); font-style: italic;">No attachments yet. Files will be stored in the network folder.</p>
+    {% endif %}
+
+    <h4 style="margin-top:15px;">Upload</h4>
+    <form method="post"
+          action="{{ url_for('add_attachment', rma_id=rma['rma_id']) }}"
+          enctype="multipart/form-data"
+          class="upload-form">
+      <input type="file" name="file" required>
+      <button type="submit" class="btn-primary">Upload</button>
+    </form>
+    <p style="font-size: 12px; color: var(--gray-500); margin-top: 8px;">
+      Files will be saved to: \\server2\users\shared_files\QC\Inspection\Megan\RMA Attachments\{{ rma['rma_id']|rma_code }}
+    </p>
+  </div>
+
+</div>  {# end detail-column #}
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const viewCard  = document.getElementById('dispositions-view');
+  const editCard  = document.getElementById('dispositions-edit-card');
+  const editBtn   = document.getElementById('dispo-edit-toggle');
+  const cancelBtn = document.getElementById('dispo-edit-cancel');
+
+  if (editBtn && viewCard && editCard) {
+    editBtn.addEventListener('click', function () {
+      viewCard.style.display = 'none';
+      editCard.style.display = 'block';
+      editCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  if (cancelBtn && viewCard && editCard) {
+    cancelBtn.addEventListener('click', function () {
+      editCard.style.display = 'none';
+      viewCard.style.display = 'block';
+      viewCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+});
+
+function showRejectForm() {
+  document.getElementById('reject-credit-form').style.display = 'block';
+}
+
+function hideRejectForm() {
+  document.getElementById('reject-credit-form').style.display = 'none';
+}
+</script>
+
+{% endblock %}

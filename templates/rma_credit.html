@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="rma-header">
+  <div class="rma-title">
+    <h2>{{ rma['rma_id']|rma_code }} - {{ rma['customer_name'] }}</h2>
+    <span class="status-badge status-{{ rma['status']|lower|replace(' ', '-') }}">{{ rma['status'] }}</span>
+    <a href="{{ url_for('view_rma_credit', rma_id=rma['rma_id']) }}" class="btn-primary" style="margin-left: 15px;">
+      Credit
+    </a>
+  </div>
+  <div class="rma-actions">
+    <form action="{{ url_for('delete_rma', rma_id=rma['rma_id']) }}" method="post" class="inline-form"
+          onsubmit="return confirm('Delete this RMA?');">
+      <button type="submit" class="btn-danger">🗑️ Delete</button>
+    </form>
+  </div>
+</div>
+
+<div class="detail-column">
+  
+  <!-- Credit Status Overview Card -->
+  <div class="card">
+    <div class="card-header">
+      <h3>Credit Information</h3>
+    </div>
+    
+    <div class="info-grid">
+      <!-- Current Status -->
+      <div class="info-item" style="grid-column: 1 / -1;">
+        <span class="info-label">Status</span>
+        <span class="info-value">
+          {% if rma.get('credit_issued_on') %}
+            <span class="status-badge" style="background-color: var(--gray-600); color: white;">Issued</span>
+            <span class="notes-meta">({{ rma['credit_issued_on']|dt_display|safe }})</span>
+          {% elif rma.get('credit_rejected') %}
+            <span class="status-badge" style="background-color: var(--gray-600); color: white;">Rejected</span>
+            {% if rma.get('credit_rejected_on') %}
+            <span class="notes-meta">({{ rma['credit_rejected_on']|dt_display|safe }}{% if rma.get('credit_rejected_by_name') %} by {{ rma['credit_rejected_by_name'] }}{% endif %})</span>
+            {% endif %}
+          {% elif rma.get('credit_approved') %}
+            <span class="status-badge" style="background-color: var(--gray-600); color: white;">Approved</span>
+            {% if rma.get('credit_approved_on') %}
+            <span class="notes-meta">({{ rma['credit_approved_on']|dt_display|safe }}{% if rma.get('credit_approved_by_name') %} by {{ rma['credit_approved_by_name'] }}{% endif %})</span>
+            {% endif %}
+          {% else %}
+            <span class="status-badge" style="background-color: var(--gray-400); color: white;">Pending</span>
+          {% endif %}
+        </span>
+      </div>
+      
+      <!-- Credit Memo Number -->
+      <div class="info-item">
+        <span class="info-label">Credit Memo #</span>
+        <span class="info-value">{{ rma.get('credit_memo_number', '-') }}</span>
+      </div>
+      
+      <!-- Credit Amount -->
+      <div class="info-item">
+        <span class="info-label">Credit Amount</span>
+        <span class="info-value">
+          {% if rma.get('credit_amount') %}
+            ${{ "%.2f"|format(rma['credit_amount']) }}
+          {% else %}
+            -
+          {% endif %}
+        </span>
+      </div>
+      
+      <!-- Approved By (when approved) -->
+      {% if rma.get('credit_approved') and rma.get('credit_approved_by_name') %}
+      <div class="info-item">
+        <span class="info-label">Approved By</span>
+        <span class="info-value">{{ rma['credit_approved_by_name'] }}</span>
+      </div>
+      {% endif %}
+      
+      <!-- Rejected By (when rejected) -->
+      {% if rma.get('credit_rejected') and rma.get('credit_rejected_by_name') %}
+      <div class="info-item">
+        <span class="info-label">Rejected By</span>
+        <span class="info-value">{{ rma['credit_rejected_by_name'] }}</span>
+      </div>
+      {% endif %}
+    </div>
+    
+    <!-- Rejection Reason (if rejected) -->
+    {% if rma.get('credit_rejected') and rma.get('credit_rejection_reason') %}
+    <div class="info-section" style="margin-top: 15px; padding: 12px; background-color: var(--gray-50); border-left: 3px solid var(--gray-400); border-radius: 4px;">
+      <h4 style="color: var(--gray-700); margin: 0 0 6px 0; font-size: 14px; font-weight: 600;">Rejection Reason</h4>
+      <p style="margin: 0; color: var(--gray-600); font-size: 14px;">{{ rma['credit_rejection_reason'] }}</p>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Credit Actions Card -->
+  {% if not rma.get('credit_issued_on') %}
+  <div class="card">
+    <div class="card-header">
+      <h3>Credit Actions</h3>
+    </div>
+    
+    {% if not rma.get('credit_approved') and not rma.get('credit_rejected') %}
+      <!-- PENDING STATE: Approve or Reject -->
+      <div style="margin-bottom: 20px;">
+        <h4 style="color: var(--gray-700); margin-bottom: 12px; font-size: 15px; font-weight: 600;">Approve Credit</h4>
+        <form method="post" action="{{ url_for('approve_credit', rma_id=rma['rma_id']) }}">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+            <div>
+              <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px; color: var(--gray-700);">Credit Amount *</label>
+              <input type="number" 
+                     name="credit_amount" 
+                     step="0.01" 
+                     placeholder="0.00" 
+                     required 
+                     class="edit-input"
+                     style="width: 100%;">
+            </div>
+            <div>
+              <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px; color: var(--gray-700);">Credit Memo # (Optional)</label>
+              <input type="text" 
+                     name="credit_memo_number" 
+                     placeholder="CM-12345"
+                     class="edit-input"
+                     style="width: 100%;">
+            </div>
+          </div>
+          <button type="submit" class="btn-primary">Approve Credit</button>
+        </form>
+      </div>
+      
+      <div style="border-top: 2px solid var(--gray-200); padding-top: 20px;">
+        <h4 style="color: var(--gray-700); margin-bottom: 12px; font-size: 15px; font-weight: 600;">Reject Credit</h4>
+        <form method="post" action="{{ url_for('reject_credit', rma_id=rma['rma_id']) }}">
+          <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px; color: var(--gray-700);">Reason for Rejection *</label>
+          <textarea name="rejection_reason" 
+                    rows="3" 
+                    required 
+                    class="edit-textarea"
+                    placeholder="Enter reason for rejecting this credit request..."></textarea>
+          <button type="submit" class="btn-secondary" style="margin-top: 10px;">Reject Credit</button>
+        </form>
+      </div>
+      
+    {% elif rma.get('credit_approved') %}
+      <!-- APPROVED STATE: Mark as Issued -->
+      <div>
+        <h4 style="color: var(--gray-700); margin-bottom: 12px; font-size: 15px; font-weight: 600;">Mark Credit as Issued</h4>
+        <p style="color: var(--gray-600); margin-bottom: 12px; font-size: 14px;">
+          Once the credit memo has been issued in your accounting system, record it here.
+        </p>
+        <form method="post" 
+              action="{{ url_for('mark_credit_issued', rma_id=rma['rma_id']) }}" 
+              onsubmit="return confirm('Confirm that credit memo has been issued in accounting system?');">
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px; color: var(--gray-700);">Credit Memo # *</label>
+            <input type="text" 
+                   name="credit_memo_number" 
+                   placeholder="CM-12345" 
+                   required
+                   value="{{ rma.get('credit_memo_number', '') }}"
+                   class="edit-input"
+                   style="max-width: 300px;">
+          </div>
+          <button type="submit" class="btn-primary">Mark as Issued</button>
+        </form>
+      </div>
+      
+    {% elif rma.get('credit_rejected') %}
+      <!-- REJECTED STATE: Reopen -->
+      <div>
+        <p style="color: var(--gray-600); font-style: italic; margin-bottom: 12px; font-size: 14px;">
+          This credit request has been rejected. You can reopen it for reconsideration if needed.
+        </p>
+        <form method="post" 
+              action="{{ url_for('reopen_credit', rma_id=rma['rma_id']) }}" 
+              onsubmit="return confirm('Reopen this credit request for reconsideration?');">
+          <button type="submit" class="btn-secondary">Reopen Credit Request</button>
+        </form>
+      </div>
+    {% endif %}
+  </div>
+  {% else %}
+    <!-- ISSUED STATE: No actions needed -->
+    <div class="card">
+      <div style="padding: 20px; color: var(--gray-500); text-align: center;">
+        <p style="margin: 0; font-size: 14px;">This credit has been fully processed and issued.</p>
+      </div>
+    </div>
+  {% endif %}
+
+  <!-- Credit History Card -->
+  <div class="card">
+    <div class="card-header">
+      <h3>Credit History</h3>
+    </div>
+    
+    {% if rma.get('credit_approved') or rma.get('credit_rejected') or rma.get('credit_issued_on') %}
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      
+      {% if rma.get('credit_issued_on') %}
+      <div style="padding: 10px; background-color: var(--gray-50); border-left: 3px solid var(--gray-400); border-radius: 4px;">
+        <div style="font-weight: 600; color: var(--gray-700); margin-bottom: 3px; font-size: 14px;">Credit Issued</div>
+        <div style="font-size: 13px; color: var(--gray-600);">
+          {{ rma['credit_issued_on']|dt_display|safe }}
+        </div>
+      </div>
+      {% endif %}
+      
+      {% if rma.get('credit_approved') %}
+      <div style="padding: 10px; background-color: var(--gray-50); border-left: 3px solid var(--gray-400); border-radius: 4px;">
+        <div style="font-weight: 600; color: var(--gray-700); margin-bottom: 3px; font-size: 14px;">Credit Approved</div>
+        <div style="font-size: 13px; color: var(--gray-600);">
+          {{ rma['credit_approved_on']|dt_display|safe }}
+          {% if rma.get('credit_approved_by_name') %}by {{ rma['credit_approved_by_name'] }}{% endif %}
+        </div>
+        {% if rma.get('credit_amount') %}
+        <div style="font-size: 13px; color: var(--gray-600); margin-top: 4px;">
+          Amount: ${{ "%.2f"|format(rma['credit_amount']) }}
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+      
+      {% if rma.get('credit_rejected') %}
+      <div style="padding: 10px; background-color: var(--gray-50); border-left: 3px solid var(--gray-400); border-radius: 4px;">
+        <div style="font-weight: 600; color: var(--gray-700); margin-bottom: 3px; font-size: 14px;">Credit Rejected</div>
+        <div style="font-size: 13px; color: var(--gray-600);">
+          {{ rma['credit_rejected_on']|dt_display|safe }}
+          {% if rma.get('credit_rejected_by_name') %}by {{ rma['credit_rejected_by_name'] }}{% endif %}
+        </div>
+      </div>
+      {% endif %}
+      
+    </div>
+    {% else %}
+    <p style="color: var(--gray-500); font-style: italic; padding: 15px; font-size: 14px;">
+      No credit history yet. Credit is pending review.
+    </p>
+    {% endif %}
+  </div>
+
+  <!-- Back to Details Link -->
+  <div style="margin-top: 15px;">
+    <a href="{{ url_for('view_rma', rma_id=rma['rma_id']) }}" class="btn-secondary">
+      ← Back to RMA Details
+    </a>
+  </div>
+
+</div>  {# end detail-column #}
+
+{% endblock %}

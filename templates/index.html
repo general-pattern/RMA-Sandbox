@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block content %}
+
+<!-- Top row: title + New RMA -->
+<div class="dashboard-header">
+  <h2>Dashboard</h2>
+  <a href="{{ url_for('new_rma') }}" class="btn-primary">➕ New RMA</a>
+</div>
+
+<!-- Two-column dashboard layout -->
+<div class="dashboard-layout">
+
+  <!-- LEFT: main content -->
+  <div class="dashboard-main">
+
+    <!-- Owner's Assigned RMAs (if user is an owner) -->
+    {% if current_user and is_owner and my_rmas_count > 0 %}
+    <div class="card" style="margin-bottom: 30px; border-left: 4px solid var(--primary);">
+      <div class="card-header">
+        <h3>My Assigned RMAs ({{ my_rmas_count }})</h3>
+        <a href="{{ url_for('dashboard') }}" class="btn-primary">View My Dashboard →</a>
+      </div>
+      <div style="padding: 15px 20px; background-color: var(--gray-50);">
+        <p style="margin: 0; color: var(--gray-700);">
+          You have <strong>{{ my_rmas_count }}</strong> RMA{{ 's' if my_rmas_count != 1 else '' }} assigned to you.
+          {% if urgent_rmas_count > 0 %}
+          <span style="color: #dc2626; font-weight: 600;">{{ urgent_rmas_count }}</span> need urgent attention (>14 days old).
+          {% endif %}
+        </p>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Recent RMAs -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Recent RMAs</h3>
+        <a href="{{ url_for('list_rmas') }}" class="view-all-link">View All →</a>
+      </div>
+      
+      {% if recent_rmas %}
+      <table>
+        <thead>
+          <tr>
+            <th>RMA #</th>
+            <th>Customer</th>
+            <th>Date</th>
+            <th>Status</th>
+            <th>Return Type</th>
+            <th>Owner</th>
+            <th>Created By</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in recent_rmas %}
+          <tr>
+            <td>
+              <a href="{{ url_for('view_rma', rma_id=r['rma_id']) }}" class="rma-link">
+                {{ r['rma_id']|rma_code }}
+              </a>
+            </td>
+            <td>{{ r['customer_name'] }}</td>
+            <td>{{ r['date_opened']|short_date }}</td>
+            <td>
+              <span class="status-badge status-{{ r['status']|lower|replace(' ', '-') }}">
+                {{ r['status'] }}
+              </span>
+            </td>
+            <td>{{ r['return_type'] or '-' }}</td>
+            <td>{{ r['OwnerName'] or '-' }}</td>
+            <td>{{ r['created_by_name'] or '-' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty-state">
+        <p>No RMAs yet.</p>
+        <a href="{{ url_for('new_rma') }}" class="btn-primary">Create Your First RMA</a>
+      </div>
+      {% endif %}
+    </div>
+
+  </div>  <!-- /.dashboard-main -->
+
+  <!-- RIGHT: stats column -->
+  <aside class="dashboard-side">
+    <div class="stats-grid">
+
+      <!-- Draft -->
+      <a href="{{ url_for('list_rmas', status='Draft') }}" class="stat-card stat-draft">
+        <div class="stat-number">{{ draft_count }}</div>
+        <div class="stat-label">Draft</div>
+      </a>
+
+      <!-- Open (Acknowledged + In Progress) -->
+      <a href="{{ url_for('list_rmas') }}?status=Acknowledged&status=In+Progress"
+         class="stat-card stat-open">
+        <div class="stat-number">{{ open_count }}</div>
+        <div class="stat-label">In Progress</div>
+      </a>
+
+      <!-- Rejected -->
+      <a href="{{ url_for('list_rmas', status='Rejected') }}" class="stat-card stat-rejected">
+        <div class="stat-number">{{ rejected_count }}</div>
+        <div class="stat-label">Rejected</div>
+      </a>
+
+      <!-- Closed -->
+      <a href="{{ url_for('list_rmas', status='Closed') }}" class="stat-card stat-closed">
+        <div class="stat-number">{{ closed_count }}</div>
+        <div class="stat-label">Closed</div>
+      </a>
+
+      <!-- Total -->
+      <a href="{{ url_for('list_rmas') }}" class="stat-card stat-total">
+        <div class="stat-number">{{ total_count }}</div>
+        <div class="stat-label">Total RMAs</div>
+      </a>
+
+    </div>
+  </aside>
+
+</div>  <!-- /.dashboard-layout -->
+
+{% endblock %}
+
+

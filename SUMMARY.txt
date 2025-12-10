@@ -1,0 +1,70 @@
+# What Changed - Summary
+
+## 5 Updates to Your RMA System
+
+### 1. Customer Date Field
+- Optional "Date Customer Opened RMA" field on RMA creation form
+- Tracks when customer opened their RMA vs when you entered it
+
+### 2. Weekly Notification Schedule  
+- Check boxes for days (Sunday - Saturday)
+- Time picker (like setting an alarm)
+- Example: "Notify me Mon/Wed/Fri at 9:00 AM"
+
+### 3. Dual Time Tracking
+- Shows TWO times side-by-side:
+  - Blue box: "In Our System" (how long you've had it)
+  - Purple box: "Customer RMA Age" (how long customer has had it)
+- Appears on dashboard and RMA detail page
+
+### 4. New RMA Button
+- ➕ "New RMA" button on dashboard header
+- No more navigating to tabs to create RMAs
+
+### 5. Cleaner RMA List
+- Better organized layout on dashboard
+- Time tracking boxes are subtle and clean
+- Not overwhelming or too big
+
+---
+
+## What the Dashboard Looks Like Now
+
+```
+┌─────────────────────────────────────────────────┐
+│ 📋 My Dashboard              [➕ New RMA]       │
+├─────────────────────────────────────────────────┤
+│ [Stats cards - same as before]                  │
+├─────────────────────────────────────────────────┤
+│ My Assigned RMAs (5)                            │
+│                                                  │
+│ 🔴 RMA0001 - Acme Corp [Draft] [View]          │
+│ ┌─────────────────┬─────────────────┐          │
+│ │ ⏱️ In Our System│ 📅 Customer Age │          │
+│ │   5 days        │   12 days       │          │
+│ └─────────────────┴─────────────────┘          │
+│ Customer complaint text here...                 │
+│                                                  │
+│ 🟡 RMA0002 - Widget Inc [In Progress] [View]   │
+│ ┌─────────────────┬─────────────────┐          │
+│ │ ⏱️ In Our System│ 📅 Customer Age │          │
+│ │   8 days        │   Not specified │          │
+│ └─────────────────┴─────────────────┘          │
+└─────────────────────────────────────────────────┘
+```
+
+Clean, organized, not overwhelming!
+
+---
+
+## Files to Replace
+
+1. app.py
+2. schema.sql
+3. templates/dashboard.html
+4. templates/rma_detail.html
+5. templates/rma_new.html
+6. templates/notifications.html
+7. migrate_notifications_and_date.py (run this first!)
+
+See DEPLOY.txt for step-by-step instructions.

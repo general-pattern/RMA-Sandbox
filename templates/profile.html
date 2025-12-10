@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2>My Profile</h2>
+
+<div class="card" style="max-width: 500px;">
+  <form method="post">
+    <div class="form-group">
+      <label for="full_name">Full Name</label>
+      <input type="text" id="full_name" name="full_name" value="{{ user['full_name'] }}" required>
+    </div>
+    
+    <div class="form-group">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" value="{{ user['email'] }}" required>
+    </div>
+    
+    <div class="form-group">
+      <label>Username</label>
+      <input type="text" value="{{ user['username'] }}" disabled style="background: #f3f4f6;">
+      <small>Username cannot be changed</small>
+    </div>
+    
+    <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
+    
+    <h4>Change Password</h4>
+    <p style="color: #6b7280; font-size: 13px;">Leave blank to keep current password</p>
+    
+    <div class="form-group">
+      <label for="current_password">Current Password</label>
+      <input type="password" id="current_password" name="current_password">
+    </div>
+    
+    <div class="form-group">
+      <label for="new_password">New Password</label>
+      <input type="password" id="new_password" name="new_password" minlength="6">
+    </div>
+    
+    <div style="margin-top: 20px;">
+      <button type="submit" class="btn-primary">Save Changes</button>
+    </div>
+  </form>
+  
+  <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px;">
+    <p><strong>Account Created:</strong> {{ user['created_on']|short_date }}</p>
+    {% if user['last_login'] %}
+    <p><strong>Last Login:</strong> {{ user['last_login']|short_date }}</p>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

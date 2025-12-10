@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h2>{{ filter_name }} RMAs</h2>
+  <a href="{{ url_for('index') }}" class="btn-secondary">← Back to Dashboard</a>
+</div>
+
+<div class="card">
+  <p class="results-count">Found {{ rmas|length }} RMA(s)</p>
+  
+  {% if rmas %}
+  <div style="padding: 0;">
+    {% for r in rmas %}
+    {% set days_open = (r['date_opened']|time_active(r['date_closed'], r['status'])) %}
+    
+    <div class="rma-dashboard-item {% if loop.index != rmas|length %}rma-dashboard-border{% endif %}">
+      <div class="rma-dashboard-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <!-- RMA Code -->
+          <a href="{{ url_for('view_rma', rma_id=r['rma_id']) }}" class="rma-dashboard-code">
+            {{ r['rma_id']|rma_code }}
+          </a>
+          
+          <!-- Customer -->
+          <span class="rma-dashboard-customer">{{ r['customer_name'] }}</span>
+          
+          <!-- Status Badge -->
+          <span class="status-badge status-{{ r['status']|lower|replace(' ', '-') }}">
+            {{ r['status'] }}
+          </span>
+        </div>
+        
+        <!-- Time Active -->
+        <div style="display: flex; align-items: center; gap: 15px;">
+          <span class="time-active-badge">{{ days_open }}</span>
+          <a href="{{ url_for('view_rma', rma_id=r['rma_id']) }}" class="btn-secondary btn-sm">View</a>
+        </div>
+      </div>
+      
+      <!-- Complaint -->
+      {% if r['customer_complaint_desc'] %}
+      <div class="rma-dashboard-complaint">
+        {{ r['customer_complaint_desc']|truncate(150) }}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <p>No {{ filter_name }} RMAs found.</p>
+  </div>
+  {% endif %}
+</div>
+
+<style>
+/* Use same styles as dashboard */
+.rma-dashboard-item {
+  padding: 20px;
+  transition: background-color 0.15s;
+}
+
+.rma-dashboard-item:hover {
+  background-color: var(--gray-50);
+}
+
+.rma-dashboard-border {
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.rma-dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rma-dashboard-code {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.rma-dashboard-code:hover {
+  text-decoration: underline;
+}
+
+.rma-dashboard-customer {
+  color: var(--gray-700);
+  font-weight: 500;
+}
+
+.rma-dashboard-complaint {
+  color: var(--gray-600);
+  font-size: 14px;
+  line-height: 1.5;
+  margin-top: 8px;
+}
+
+.time-active-badge {
+  background-color: var(--gray-100);
+  color: var(--gray-700);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+</style>
+
+{% endblock %}

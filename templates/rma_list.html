@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h2>RMAs</h2>
+  <a href="{{ url_for('new_rma') }}" class="btn-primary">➕ New RMA</a>
+</div>
+
+<!-- Search & Filter Form -->
+<div class="card filter-card">
+  <form method="get" action="{{ url_for('list_rmas') }}" class="filter-form">
+    <div class="filter-grid">
+      <div class="filter-group">
+        <label>Search</label>
+        <input type="text" name="search" placeholder="RMA #, customer, owner..." 
+               value="{{ current_filters.search or '' }}">
+      </div>
+      
+      <div class="filter-group">
+        <label>Status</label>
+        <select name="status">
+          <option value="">All Statuses</option>
+          {% for s in status_options %}
+          <option value="{{ s }}" {% if current_filters.status == s %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      
+      <div class="filter-group">
+        <label>Return Type</label>
+        <select name="return_type">
+          <option value="">All Types</option>
+          <option value="Credit" {% if current_filters.return_type == 'Credit' %}selected{% endif %}>Credit</option>
+          <option value="Replacement" {% if current_filters.return_type == 'Replacement' %}selected{% endif %}>Replacement</option>
+          <option value="Repair and Return" {% if current_filters.return_type == 'Repair and Return' %}selected{% endif %}>Repair and Return</option>
+          <option value="TBD" {% if current_filters.return_type == 'TBD' %}selected{% endif %}>TBD</option>
+        </select>
+      </div>
+      
+      <div class="filter-group">
+        <label>Customer</label>
+        <select name="customer_id">
+          <option value="">All Customers</option>
+          {% for c in customers %}
+          <option value="{{ c['customer_id'] }}" {% if current_filters.customer_id == c['customer_id']|string %}selected{% endif %}>
+            {{ c['customer_name'] }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      
+      <div class="filter-group">
+        <label>Owner</label>
+        <select name="owner_id">
+          <option value="">All Owners</option>
+          {% for o in owners %}
+          <option value="{{ o['user_id'] }}" {% if current_filters.owner_id == o['user_id']|string %}selected{% endif %}>
+            {{ o['full_name'] }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      
+      <div class="filter-group">
+        <label>From Date</label>
+        <input type="date" name="from_date" value="{{ current_filters.from_date or '' }}">
+      </div>
+      
+      <div class="filter-group">
+        <label>To Date</label>
+        <input type="date" name="to_date" value="{{ current_filters.to_date or '' }}">
+      </div>
+      
+      <div class="filter-group">
+        <label>Credit Approved</label>
+        <select name="credit_approved">
+          <option value="">All</option>
+          <option value="pending" {% if current_filters.credit_approved == 'pending' %}selected{% endif %}>Pending</option>
+          <option value="approved" {% if current_filters.credit_approved == 'approved' %}selected{% endif %}>Approved</option>
+          <option value="rejected" {% if current_filters.credit_approved == 'rejected' %}selected{% endif %}>Rejected</option>
+        </select>
+      </div>
+      
+      <div class="filter-group">
+        <label>Disposition Status</label>
+        <select name="disposition_status">
+          <option value="">All</option>
+          <option value="completed" {% if current_filters.disposition_status == 'completed' %}selected{% endif %}>Completed</option>
+          <option value="pending" {% if current_filters.disposition_status == 'pending' %}selected{% endif %}>Pending</option>
+        </select>
+      </div>
+      
+      <div class="filter-group filter-actions">
+        <button type="submit" class="btn-primary">Search</button>
+        <a href="{{ url_for('list_rmas') }}" class="btn-secondary">Clear</a>
+      </div>
+    </div>
+  </form>
+</div>
+
+<!-- Results -->
+<div class="card">
+  <p class="results-count">Found {{ rmas|length }} RMA(s)</p>
+  
+  {% if rmas %}
+  <table>
+    <thead>
+      <tr>
+        <th>RMA #</th>
+        <th>Customer</th>
+        <th>Date Dispositioned</th>
+        <th>Time Active</th>
+        <th>Status</th>
+        <th>Return Type</th>
+        <th>Owner</th>
+        <th>Credit Approved</th>
+        <th>Credit Memo #</th>
+        <th>Disposition</th>
+        {% if current_user and current_user['role'] == 'admin' %}
+        <th>Actions</th>
+        {% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rmas %}
+      <tr>
+        <td>
+          <a href="{{ url_for('view_rma', rma_id=r['rma_id']) }}" class="rma-link">
+            {{ r['rma_id']|rma_code }}
+          </a>
+        </td>
+        <td>{{ r['customer_name'] }}</td>
+        <td>{{ r['date_opened']|short_date }}</td>
+        <td style="font-weight: 600; color: var(--primary);">
+          {{ r['date_opened']|time_active(r['date_closed'], r['status']) }}
+        </td>
+        <td>
+          <span class="status-badge status-{{ r['status']|lower|replace(' ', '-') }}">
+            {{ r['status'] }}
+          </span>
+        </td>
+        <td>{{ r['return_type'] or '-' }}</td>
+        <td>{{ r['owners'] or '-' }}</td>
+        <td>
+          {% if r['credit_approved'] %}
+            <span class="ack-yes">✓</span>
+          {% else %}
+            <span class="ack-no">✗</span>
+          {% endif %}
+        </td>
+        <td>{{ r['credit_memo_number'] or '-' }}</td>
+        <td>
+          {% if r['last_dispo_date'] %}
+            {{ r['last_dispo_date']|dt_display | safe }}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        {% if current_user and current_user['role'] == 'admin' %}
+        <td>
+          <form method="post" action="{{ url_for('delete_rma', rma_id=r['rma_id']) }}" 
+                style="display: inline;" 
+                onsubmit="return confirm('Delete RMA {{ r['rma_id']|rma_code }}? This cannot be undone.');">
+            <button type="submit" class="btn-link" style="color: #dc2626; font-size: 18px;" title="Delete RMA">🗑️</button>
+          </form>
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">
+    <p>No RMAs found matching your criteria.</p>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

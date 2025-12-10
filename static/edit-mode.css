@@ -1,0 +1,61 @@
+/* Editable field styling for inline edit mode */
+.editable-field {
+    background-color: #f3f4f6;  /* light cool grey */
+    border: 2px solid #9ca3af;  /* medium grey border */
+    border-radius: 6px;
+    padding: 12px !important;
+    position: relative;
+}
+
+.editable-field::before {
+    content: "✎";
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 16px;
+    opacity: 0.45;  /* toned-down grey */
+    color: #6b7280; /* slate grey */
+}
+
+.edit-input,
+.edit-textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #cbd5e1; /* soft grey border */
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: inherit;
+    background-color: #ffffff;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.edit-input:focus,
+.edit-textarea:focus {
+    outline: none;
+    border-color: #6b7280; /* darker grey on focus */
+    box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.15); /* grey glow */
+}
+
+.edit-textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+/* Make the card stand out in edit mode */
+.card-editing {
+    border: 2px solid #9ca3af; /* medium grey */
+    box-shadow: 0 4px 12px rgba(107, 114, 128, 0.15); /* subtle grey shadow */
+}
+
+.card-editing .card-header {
+    background-color: #f1f5f9; /* subtle light grey-blue */
+    border-bottom: 2px solid #9ca3af;
+}
+
+/* Form actions styling */
+.form-actions {
+    display: flex;
+    gap: 10px;
+    padding-top: 15px;
+    border-top: 1px solid #d1d5db; /* lighter grey */
+}

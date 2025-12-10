@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header"><h2>Edit Customer</h2></div>
+<div class="card" style="max-width: 500px;">
+  <form method="post">
+    <div class="form-group">
+      <label>Customer Name <span class="required">*</span></label>
+      <input type="text" name="customer_name" value="{{ customer['customer_name'] }}" required>
+    </div>
+    <div class="form-group">
+      <label>Contact Name</label>
+      <input type="text" name="contact_name" value="{{ customer['contact_name'] or '' }}">
+    </div>
+    <div class="form-group">
+      <label>Contact Email</label>
+      <input type="email" name="contact_email" value="{{ customer['contact_email'] or '' }}">
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn-primary">Save Changes</button>
+      <a href="{{ url_for('list_customers') }}" class="btn-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

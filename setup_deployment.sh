@@ -1,0 +1,18 @@
+#!/bin/bash
+# Just run this to see what you need to do
+echo "📋 Files you need to create/update:"
+echo ""
+echo "NEW FILES:"
+echo "  - Procfile"
+echo "  - startup.sh"
+echo "  - runtime.txt"
+echo "  - .env.example"
+echo "  - README.md"
+echo "  - DEPLOYMENT_GUIDE.md"
+echo ""
+echo "UPDATE:"
+echo "  - requirements.txt (add gunicorn)"
+echo "  - .gitignore (enhanced version)"
+echo "  - static/style.css (add dashboard styles)"
+echo ""
+echo "👉 Copy content from the deployment package artifact"

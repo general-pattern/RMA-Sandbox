@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+  <h2>👤 Internal Owners</h2>
+  {% if current_user['role'] == 'admin' %}
+  <a href="{{ url_for('new_owner') }}" class="btn-primary">➕ Add Owner</a>
+  {% endif %}
+</div>
+
+<div class="card">
+  <p class="results-count">{{ owners|length }} internal owner{{ 's' if owners|length != 1 else '' }}</p>
+  
+  {% if owners %}
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Email</th>
+        <th>Total RMAs</th>
+        <th>Open</th>
+        <th>Pending</th>
+        {% if current_user['role'] == 'admin' %}
+        <th>Actions</th>
+        {% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in owners %}
+      <tr>
+        <td><strong>{{ o['OwnerName'] }}</strong></td>
+        <td><a href="mailto:{{ o['OwnerEmail'] }}">{{ o['OwnerEmail'] }}</a></td>
+        <td>{{ o['rma_count'] or 0 }}</td>
+        <td>{% if o['open_count'] %}<span class="status-badge status-open">{{ o['open_count'] }}</span>{% else %}0{% endif %}</td>
+        <td>{% if o['pending_count'] %}<span class="status-badge status-pending">{{ o['pending_count'] }}</span>{% else %}0{% endif %}</td>
+        {% if current_user['role'] == 'admin' %}
+        <td>
+          <div style="display: flex; gap: 8px;">
+            <a href="{{ url_for('edit_owner', owner_id=o['user_id']) }}" 
+               class="btn-secondary" 
+               style="padding: 4px 8px; font-size: 12px; text-decoration: none;">
+              Edit
+            </a>
+            {% if not o['rma_count'] %}
+            <form method="post" action="{{ url_for('delete_owner', owner_id=o['user_id']) }}" 
+                  style="display: inline;"
+                  onsubmit="return confirm('Are you sure you want to delete {{ o['OwnerName'] }}?');">
+              <button type="submit" class="btn-secondary" style="padding: 4px 8px; font-size: 12px; color: #dc2626;">
+                Delete
+              </button>
+            </form>
+            {% else %}
+            <span style="color: var(--gray-400); font-size: 12px;">Has RMAs</span>
+            {% endif %}
+          </div>
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><p>No internal owners yet.</p></div>
+  {% endif %}
+</div>
+{% endblock %}

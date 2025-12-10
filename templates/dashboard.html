@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+  <h2>📋 My Dashboard</h2>
+  <a href="{{ url_for('new_rma') }}" class="btn-primary">➕ New RMA</a>
+</div>
+
+{% if not is_owner %}
+<div class="card">
+  <div class="empty-state">
+    <p>You are not configured as an internal owner.</p>
+    <p>Contact your administrator to set up owner access.</p>
+  </div>
+</div>
+{% else %}
+
+<!-- Summary Stats -->
+<div class="stats-grid" style="margin-bottom: 30px;">
+  <a href="{{ url_for('list_rmas', owner_id=current_user['user_id']) }}" style="text-decoration: none;">
+    <div class="stat-card stat-total">
+      <div class="stat-number">{{ stats.total }}</div>
+      <div class="stat-label">Assigned to Me</div>
+    </div>
+  </a>
+  
+  <a href="{{ url_for('dashboard_filtered', filter='urgent') }}" style="text-decoration: none;">
+    <div class="stat-card {% if stats.urgent > 0 %}stat-urgent{% else %}stat-pending{% endif %}">
+      <div class="stat-number">{{ stats.urgent }}</div>
+      <div class="stat-label">Urgent (>14 days)</div>
+    </div>
+  </a>
+  
+  <a href="{{ url_for('dashboard_filtered', filter='warning') }}" style="text-decoration: none;">
+    <div class="stat-card {% if stats.warning > 0 %}stat-open{% else %}stat-pending{% endif %}">
+      <div class="stat-number">{{ stats.warning }}</div>
+      <div class="stat-label">Warning (7-14 days)</div>
+    </div>
+  </a>
+  
+  <a href="{{ url_for('dashboard_filtered', filter='normal') }}" style="text-decoration: none;">
+    <div class="stat-card stat-info">
+      <div class="stat-number">{{ stats.normal }}</div>
+      <div class="stat-label">Normal (<7 days)</div>
+    </div>
+  </a>
+</div>
+
+<!-- My RMAs -->
+<div class="card">
+  <div class="card-header">
+    <h3>My Assigned RMAs ({{ my_rmas|length }})</h3>
+    <span style="color: var(--gray-500); font-size: 13px; font-weight: normal;">
+      Sorted by age (oldest first)
+    </span>
+  </div>
+  
+  {% if my_rmas %}
+  <div style="padding: 0;">
+    {% for r in my_rmas %}
+    {% set days_open = (r['date_opened']|time_active(r['date_closed'], r['status'])) %}
+    {% set days_num = days_open.replace('days', '').replace('day', '').replace('weeks', '').replace('week', '').replace('months', '').replace('month', '').replace('h', '').strip()|int if days_open else 0 %}
+    
+    <div class="rma-dashboard-item {% if loop.index != my_rmas|length %}rma-dashboard-border{% endif %}">
+      <!-- Single row with columns -->
+      <div style="display: grid; grid-template-columns: auto 1fr auto auto; gap: 15px; align-items: center;">
+        
+        <!-- Column 1: Urgency + RMA Code + Customer -->
+        <div style="display: flex; align-items: center; gap: 10px;">
+          {% if 'week' in days_open or 'month' in days_open %}
+            {% if 'month' in days_open or days_num >= 2 %}
+              <span class="urgency-badge urgency-urgent">🔴</span>
+            {% else %}
+              <span class="urgency-badge urgency-warning">🟡</span>
+            {% endif %}
+          {% else %}
+            <span class="urgency-badge urgency-normal">🟢</span>
+          {% endif %}
+          
+          <a href="{{ url_for('view_rma', rma_id=r['rma_id']) }}" class="rma-dashboard-code">
+            {{ r['rma_id']|rma_code }}
+          </a>
+          
+          <span class="rma-dashboard-customer">{{ r['customer_name'] }}</span>
+          
+          <span class="status-badge status-{{ r['status']|lower|replace(' ', '-') }}">
+            {{ r['status'] }}
+          </span>
+        </div>
+        
+        <!-- Column 2: Time tracking (small, inline) -->
+        <div style="display: flex; gap: 12px; font-size: 12px;">
+          <div style="display: flex; align-items: center; gap: 5px;">
+            <span style="color: var(--gray-500);">⏱️ In System:</span>
+            <span style="font-weight: 600; color: var(--gray-700);">{{ days_open }}</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 5px;">
+            <span style="color: var(--gray-500);">📅 Customer:</span>
+            {% if r['customer_date_opened'] %}
+            <span style="font-weight: 600; color: var(--gray-700);">{{ r['customer_date_opened']|time_active(r['date_closed'], r['status']) }}</span>
+            {% else %}
+            <span style="color: var(--gray-400);">Not set</span>
+            {% endif %}
+          </div>
+        </div>
+        
+        <!-- Column 3: Complaint snippet -->
+        <div style="color: var(--gray-600); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px;">
+          {% if r['customer_complaint_desc'] %}
+            {{ r['customer_complaint_desc']|truncate(80) }}
+          {% else %}
+            <span style="color: var(--gray-400);">No complaint</span>
+          {% endif %}
+        </div>
+        
+        <!-- Column 4: View button -->
+        <a href="{{ url_for('view_rma', rma_id=r['rma_id']) }}" class="btn-secondary btn-sm">View</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  
+  {% else %}
+  <div class="empty-state">
+    <p>🎉 You have no open RMAs assigned!</p>
+    <p style="color: var(--gray-500); font-size: 14px;">
+      New RMAs will appear here when assigned to you.
+    </p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Quick Actions -->
+<div style="margin-top: 20px; display: flex; gap: 10px;">
+  <a href="{{ url_for('list_rmas') }}" class="btn-secondary">View All RMAs</a>
+  <a href="{{ url_for('notification_preferences') }}" class="btn-secondary">Notification Settings</a>
+</div>
+
+{% endif %}
+
+<style>
+/* Dashboard Stats */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+}
+
+.stat-card {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  border: 2px solid var(--gray-200);
+  text-align: center;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.stat-number {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--gray-800);
+  margin-bottom: 5px;
+}
+
+.stat-label {
+  font-size: 13px;
+  color: var(--gray-600);
+  font-weight: 500;
+}
+
+.stat-urgent {
+  border-color: #dc2626;
+  background: #fef2f2;
+}
+
+.stat-urgent .stat-number {
+  color: #dc2626;
+}
+
+/* Dashboard RMA Items */
+.rma-dashboard-item {
+  padding: 14px 16px;
+  transition: background-color 0.15s;
+}
+
+.rma-dashboard-item:hover {
+  background-color: var(--gray-50);
+}
+
+.rma-dashboard-border {
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.rma-dashboard-code {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.rma-dashboard-code:hover {
+  text-decoration: underline;
+}
+
+.rma-dashboard-customer {
+  color: var(--gray-700);
+  font-weight: 500;
+  font-size: 14px;
+}
+
+/* Urgency Badges */
+.urgency-badge {
+  display: inline-block;
+  font-size: 14px;
+}
+
+.urgency-urgent {
+  color: #991b1b;
+}
+
+.urgency-warning {
+  color: #92400e;
+}
+
+.urgency-normal {
+  color: #065f46;
+}
+
+/* Button Small */
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+  .rma-dashboard-item > div {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+</style>
+
+{% endblock %}

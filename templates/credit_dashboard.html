@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h1>Credit Management</h1>
+    
+    <!-- Statistics Cards -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <h3>{{ stats['total'] }}</h3>
+            <p>Total Credit Requests</p>
+        </div>
+        <div class="stat-card green">
+            <h3>{{ stats['approved'] }}</h3>
+            <p>Approved</p>
+            <small>${{ "%.2f"|format(stats['total_approved_amount'] or 0) }}</small>
+        </div>
+        <div class="stat-card yellow">
+            <h3>{{ stats['pending'] }}</h3>
+            <p>Pending Approval</p>
+            <small>${{ "%.2f"|format(stats['pending_amount'] or 0) }}</small>
+        </div>
+        <div class="stat-card red">
+            <h3>{{ stats['rejected'] }}</h3>
+            <p>Rejected</p>
+        </div>
+    </div>
+    
+    <!-- Credit Requests Table -->
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>RMA #</th>
+                <th>Customer</th>
+                <th>Amount</th>
+                <th>Memo #</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for credit in credits %}
+            <tr>
+                <td><a href="{{ url_for('view_rma', rma_id=credit['rma_id']) }}">RMA{{ "%04d"|format(credit['rma_id']) }}</a></td>
+                <td>{{ credit['customer_name'] }}</td>
+                <td>${{ "%.2f"|format(credit['credit_amount'] or 0) }}</td>
+                <td>{{ credit['credit_memo_number'] or '-' }}</td>
+                <td>
+                    {% if credit['credit_approved'] %}
+                        <span class="badge green">Approved</span>
+                    {% elif credit['credit_rejected'] %}
+                        <span class="badge red">Rejected</span>
+                    {% else %}
+                        <span class="badge yellow">Pending</span>
+                    {% endif %}
+                </td>
+                <td>{{ credit['date_opened'][:10] }}</td>
+                <td>
+                    <a href="{{ url_for('view_rma', rma_id=credit['rma_id']) }}" class="btn-small">View</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

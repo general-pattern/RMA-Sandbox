@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+
+  <h2>Edit RMA {{ rma['rma_id'] }}</h2>
+
+  <div class="card">
+    <form method="post">
+
+      <p>
+        <label>Customer:
+          <select name="customer_id" required>
+            {% for c in customers %}
+              <option value="{{ c['customer_id'] }}"
+                {% if c['customer_id'] == rma['customer_id'] %}selected{% endif %}>
+                {{ c['customer_name'] }}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+      </p>
+
+      <p>
+        <label>Status:
+          <select name="status">
+            <option value="Open"   {% if rma['status'] == 'Open' %}selected{% endif %}>Open</option>
+            <option value="Closed" {% if rma['status'] == 'Closed' %}selected{% endif %}>Closed</option>
+          </select>
+        </label>
+      </p>
+
+      <p>
+        <label>Return Type:
+          <select name="return_type">
+            <option value="TBD" {% if rma['return_type'] == 'TBD' %}selected{% endif %}>TBD</option>
+            <option value="Credit" {% if rma['return_type'] == 'Credit' %}selected{% endif %}>Credit</option>
+            <option value="Replacement" {% if rma['return_type'] == 'Replacement' %}selected{% endif %}>Replacement</option>
+            <option value="Repair and Return" {% if rma['return_type'] == 'Repair and Return' %}selected{% endif %}>Repair and Return</option>
+          </select>
+        </label>
+      </p>
+
+      <p>
+        <label>Reported By:
+          <input type="text" name="reported_by" value="{{ rma['ReportedBy'] or '' }}">
+        </label>
+      </p>
+
+      <p>
+        <label>Internal Owner:
+          <input type="text" name="internal_owner" value="{{ rma['InternalOwner'] or '' }}">
+        </label>
+      </p>
+
+      <p>
+        <label>Customer Complaint:</label><br>
+        <textarea name="complaint" rows="4" cols="60">{{ rma['customer_complaint_desc'] or '' }}</textarea>
+      </p>
+
+      <p>
+        <label>Internal Notes:</label><br>
+        <textarea name="internal_notes" rows="3" cols="60">{{ rma['internal_notes'] or '' }}</textarea>
+      </p>
+
+      <p>
+        <button type="submit">Save Changes</button>
+        <a href="{{ url_for('view_rma', rma_id=rma['rma_id']) }}">
+          <button type="button">Cancel</button>
+        </a>
+      </p>
+    </form>
+  </div>
+
+{% endblock %}

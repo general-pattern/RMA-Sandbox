@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+.confirm-dialog {
+    max-width: 500px;
+    margin: 100px auto;
+    text-align: center;
+}
+
+.confirm-card {
+    background: white;
+    border-radius: 12px;
+    padding: 40px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    border: 2px solid var(--primary);
+}
+
+.confirm-icon {
+    font-size: 64px;
+    margin-bottom: 20px;
+}
+
+.confirm-title {
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--gray-800);
+    margin-bottom: 15px;
+}
+
+.confirm-message {
+    font-size: 16px;
+    color: var(--gray-600);
+    margin-bottom: 10px;
+}
+
+.filename-display {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--primary);
+    background-color: var(--gray-50);
+    padding: 12px 20px;
+    border-radius: 6px;
+    margin: 20px 0;
+    word-break: break-all;
+}
+
+.button-group {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    margin-top: 30px;
+}
+
+.btn-confirm {
+    background-color: var(--primary);
+    color: white;
+    padding: 12px 30px;
+    border: none;
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    transition: background-color 0.2s;
+}
+
+.btn-confirm:hover {
+    background-color: #1e40af;
+}
+
+.btn-cancel {
+    background-color: white;
+    color: var(--gray-700);
+    padding: 12px 30px;
+    border: 2px solid var(--gray-300);
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    transition: all 0.2s;
+}
+
+.btn-cancel:hover {
+    border-color: var(--gray-400);
+    background-color: var(--gray-50);
+}
+
+.helper-text {
+    font-size: 14px;
+    color: var(--gray-500);
+    margin-top: 20px;
+    font-style: italic;
+}
+</style>
+
+<div class="confirm-dialog">
+    <div class="confirm-card">
+        <div class="confirm-icon">📂</div>
+        <h2 class="confirm-title">Folder Opened</h2>
+        <p class="confirm-message">The file explorer is now showing the attachments folder.</p>
+        
+        <div class="filename-display">
+            📄 {{ filename }}
+        </div>
+        
+        <p class="confirm-message">Would you like to open this file?</p>
+        
+        <div class="button-group">
+            <form method="post" action="{{ url_for('do_open_file', rma_id=rma_id, attachment_id=attachment_id) }}" style="display: inline;">
+                <button type="submit" class="btn-confirm">
+                    ✓ Yes, Open File
+                </button>
+            </form>
+            
+            <a href="{{ url_for('view_rma', rma_id=rma_id) }}" class="btn-cancel">
+                ✗ No, Just Browse
+            </a>
+        </div>
+        
+        <p class="helper-text">
+            💡 Tip: You can also double-click the file in the folder that just opened
+        </p>
+    </div>
+</div>
+
+{% endblock %}

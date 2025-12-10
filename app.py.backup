@@ -1,0 +1,1878 @@
+from flask import Flask, render_template, request, redirect, url_for, send_from_directory, session, flash
+import sqlite3
+from datetime import datetime
+import os
+from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import shutil  # add this
+
+
+DB_PATH = "rma.db"
+
+app = Flask(__name__)
+app.secret_key = 'your-secret-key-change-in-production'  # Change this in production!
+
+app.config['UPLOAD_FOLDER'] = os.path.join(os.getcwd(), 'uploads')
+app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024
+ALLOWED_EXTENSIONS = {'pdf', 'jpg', 'jpeg', 'png'}
+
+# Email configuration
+EMAIL_CONFIG = {
+    'enabled': False,
+    'smtp_server': 'smtp.gmail.com',
+    'smtp_port': 587,
+    'sender_email': 'your-email@gmail.com',
+    'sender_password': 'your-app-password',
+    'base_url': 'http://127.0.0.1:5000'
+}
+
+# Status flow options
+# Canonical statuses for the whole app
+STATUS_OPTIONS = ['Draft', 'Acknowledged', 'In Progress', 'Rejected', 'Closed']
+
+
+# ============ TEMPLATE FILTERS ============
+
+@app.template_filter("rma_code")
+def rma_code_filter(value):
+    try:
+        return f"RMA{int(value):04d}"
+    except:
+        return value
+
+
+@app.template_filter("currency")
+def currency_filter(value):
+    try:
+        return f"${float(value):,.2f}"
+    except:
+        return value or '-'
+
+
+@app.template_filter("short_date")
+def short_date_filter(value):
+    try:
+        dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        return dt.strftime("%b %d, %Y")
+    except:
+        return value or '-'
+
+
+@app.template_filter("time_active")
+def time_active_filter(date_opened, date_closed_or_status, current_status):
+    """Calculate how long an RMA has been active"""
+    try:
+        start_dt = datetime.strptime(date_opened, "%Y-%m-%d %H:%M:%S")
+        
+        # If closed or rejected, use that date
+        if current_status in ['Closed', 'Rejected'] and date_closed_or_status:
+            end_dt = datetime.strptime(date_closed_or_status, "%Y-%m-%d %H:%M:%S")
+        else:
+            # Still active, use current time
+            end_dt = datetime.now()
+        
+        delta = end_dt - start_dt
+        days = delta.days
+        hours = delta.seconds // 3600
+        
+        if days == 0:
+            return f"{hours}h"
+        elif days == 1:
+            return "1 day"
+        elif days < 7:
+            return f"{days} days"
+        elif days < 30:
+            weeks = days // 7
+            return f"{weeks} week{'s' if weeks > 1 else ''}"
+        else:
+            months = days // 30
+            return f"{months} month{'s' if months > 1 else ''}"
+    except:
+        return '-'
+
+
+# ============ HELPERS ============
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash('Please log in to access this page.', 'warning')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def get_current_user():
+    if 'user_id' in session:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users WHERE UserID = ?", (session['user_id'],))
+        user = cur.fetchone()
+        conn.close()
+        return user
+    return None
+
+
+def send_rma_notification(owner_email, owner_name, rma_id, rma_code, customer_name, return_type, complaint, created_by):
+    if not EMAIL_CONFIG['enabled']:
+        print(f"[EMAIL DISABLED] Would send to {owner_email}: New RMA {rma_code}")
+        return False
+    
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f"New RMA Assigned: {rma_code} - {customer_name}"
+        msg['From'] = EMAIL_CONFIG['sender_email']
+        msg['To'] = owner_email
+        
+        rma_url = f"{EMAIL_CONFIG['base_url']}/rmas/{rma_id}"
+        
+        html_content = f"""
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #1d4ed8;">New RMA Assigned: {rma_code}</h2>
+        <p>Hello {owner_name},</p>
+        <p>A new RMA has been assigned to you by <strong>{created_by}</strong>.</p>
+        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+            <tr><td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9;"><strong>RMA Number</strong></td><td style="padding: 8px; border: 1px solid #ddd;">{rma_code}</td></tr>
+            <tr><td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9;"><strong>Customer</strong></td><td style="padding: 8px; border: 1px solid #ddd;">{customer_name}</td></tr>
+            <tr><td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9;"><strong>Return Type</strong></td><td style="padding: 8px; border: 1px solid #ddd;">{return_type}</td></tr>
+        </table>
+        <div style="background: #f3f4f6; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <strong>Customer Complaint:</strong><br>{complaint or 'No description provided'}
+        </div>
+        <p><a href="{rma_url}" style="display: inline-block; background: #1d4ed8; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px;">View RMA</a></p>
+    </div>
+</body>
+</html>
+        """
+        
+        msg.attach(MIMEText(html_content, 'html'))
+        
+        with smtplib.SMTP(EMAIL_CONFIG['smtp_server'], EMAIL_CONFIG['smtp_port']) as server:
+            server.starttls()
+            server.login(EMAIL_CONFIG['sender_email'], EMAIL_CONFIG['sender_password'])
+            server.sendmail(EMAIL_CONFIG['sender_email'], owner_email, msg.as_string())
+        
+        return True
+    except Exception as e:
+        print(f"[EMAIL ERROR] {e}")
+        return False
+
+
+# ============ AUTHENTICATION ============
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if 'user_id' in session:
+        return redirect(url_for('index'))
+    
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users WHERE Username = ?", (username,))
+        user = cur.fetchone()
+        
+        if user and check_password_hash(user['PasswordHash'], password):
+            session['user_id'] = user['UserID']
+            session['username'] = user['Username']
+            session['full_name'] = user['FullName']
+            
+            cur.execute("UPDATE users SET LastLogin = ? WHERE UserID = ?",
+                       (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user['UserID']))
+            conn.commit()
+            conn.close()
+            
+            flash(f'Welcome back, {user["FullName"]}!', 'success')
+            return redirect(url_for('index'))
+        
+        conn.close()
+        flash('Invalid username or password.', 'error')
+    
+    return render_template("login.html")
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if 'user_id' in session:
+        return redirect(url_for('index'))
+    
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        confirm_password = request.form.get("confirm_password", "")
+        full_name = request.form.get("full_name", "").strip()
+        email = request.form.get("email", "").strip()
+        
+        if not all([username, password, full_name, email]):
+            flash('All fields are required.', 'error')
+            return render_template("register.html")
+        
+        if password != confirm_password:
+            flash('Passwords do not match.', 'error')
+            return render_template("register.html")
+        
+        if len(password) < 6:
+            flash('Password must be at least 6 characters.', 'error')
+            return render_template("register.html")
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        cur.execute("SELECT UserID FROM users WHERE Username = ?", (username,))
+        if cur.fetchone():
+            conn.close()
+            flash('Username already exists.', 'error')
+            return render_template("register.html")
+        
+        cur.execute("SELECT UserID FROM users WHERE Email = ?", (email,))
+        if cur.fetchone():
+            conn.close()
+            flash('Email already registered.', 'error')
+            return render_template("register.html")
+        
+        password_hash = generate_password_hash(password)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        cur.execute("""
+            INSERT INTO users (Username, PasswordHash, FullName, Email, CreatedOn)
+            VALUES (?, ?, ?, ?, ?)
+        """, (username, password_hash, full_name, email, now))
+        
+        conn.commit()
+        conn.close()
+        
+        flash('Account created successfully! Please log in.', 'success')
+        return redirect(url_for('login'))
+    
+    return render_template("register.html")
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    flash('You have been logged out.', 'info')
+    return redirect(url_for('login'))
+
+
+@app.route("/profile", methods=["GET", "POST"])
+@login_required
+def profile():
+    user = get_current_user()
+    
+    if request.method == "POST":
+        full_name = request.form.get("full_name", "").strip()
+        email = request.form.get("email", "").strip()
+        current_password = request.form.get("current_password", "")
+        new_password = request.form.get("new_password", "")
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        if new_password:
+            if not check_password_hash(user['PasswordHash'], current_password):
+                flash('Current password is incorrect.', 'error')
+                conn.close()
+                return render_template("profile.html", user=user)
+            
+            if len(new_password) < 6:
+                flash('New password must be at least 6 characters.', 'error')
+                conn.close()
+                return render_template("profile.html", user=user)
+            
+            password_hash = generate_password_hash(new_password)
+            cur.execute("UPDATE users SET FullName = ?, Email = ?, PasswordHash = ? WHERE UserID = ?",
+                       (full_name, email, password_hash, session['user_id']))
+        else:
+            cur.execute("UPDATE users SET FullName = ?, Email = ? WHERE UserID = ?",
+                       (full_name, email, session['user_id']))
+        
+        conn.commit()
+        conn.close()
+        
+        session['full_name'] = full_name
+        flash('Profile updated successfully.', 'success')
+        return redirect(url_for('profile'))
+    
+    return render_template("profile.html", user=user)
+
+
+# ============ DASHBOARD ============
+
+@app.route("/")
+@login_required
+def index():
+    conn = get_db()
+    cur = conn.cursor()
+    
+    # Draft (was Pending)
+    cur.execute("SELECT COUNT(*) FROM rmas WHERE Status = 'Draft'")
+    draft_count = cur.fetchone()[0]
+    
+    # "Open" = Acknowledged + In Progress (matches the In Progress card on dashboard)
+    cur.execute("SELECT COUNT(*) FROM rmas WHERE Status IN ('Acknowledged', 'In Progress')")
+    open_count = cur.fetchone()[0]
+    
+    # Rejected
+    cur.execute("SELECT COUNT(*) FROM rmas WHERE Status = 'Rejected'")
+    rejected_count = cur.fetchone()[0]
+    
+    # Closed
+    cur.execute("SELECT COUNT(*) FROM rmas WHERE Status = 'Closed'")
+    closed_count = cur.fetchone()[0]
+    
+    # Total
+    cur.execute("SELECT COUNT(*) FROM rmas")
+    total_count = cur.fetchone()[0]
+    
+    # Recent RMAs
+    cur.execute("""
+        SELECT r.*, c.CustomerName, o.OwnerName, u.FullName as CreatedByName
+        FROM rmas r
+        JOIN customers c ON r.CustomerID = c.CustomerID
+        LEFT JOIN internal_owners o ON r.InternalOwnerID = o.OwnerID
+        LEFT JOIN users u ON r.CreatedByUserID = u.UserID
+        ORDER BY r.DateOpened DESC
+        LIMIT 5
+    """)
+    recent_rmas = cur.fetchall()
+    
+    conn.close()
+    
+    return render_template(
+        "index.html",
+        draft_count=draft_count,
+        open_count=open_count,
+        rejected_count=rejected_count,
+        closed_count=closed_count,
+        total_count=total_count,
+        recent_rmas=recent_rmas
+    )
+
+
+# ============ METRICS DASHBOARD ============
+
+@app.route("/metrics")
+@login_required
+def metrics():
+    from datetime import timedelta
+    
+    week = request.args.get("week", "all")  # all, this_week, last_week, last_4_weeks
+    
+    conn = get_db()
+    cur = conn.cursor()
+    
+    # Calculate date ranges
+    now = datetime.now()
+    start_of_week = now - timedelta(days=now.weekday())
+    start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    if week == "this_week":
+        date_filter = f"AND DATE(r.DateOpened) >= '{start_of_week.strftime('%Y-%m-%d')}'"
+        week_label = "This Week"
+    elif week == "last_week":
+        last_week_start = start_of_week - timedelta(days=7)
+        last_week_end = start_of_week
+        date_filter = f"AND DATE(r.DateOpened) >= '{last_week_start.strftime('%Y-%m-%d')}' AND DATE(r.DateOpened) < '{last_week_end.strftime('%Y-%m-%d')}'"
+        week_label = "Last Week"
+    elif week == "last_4_weeks":
+        four_weeks_ago = start_of_week - timedelta(days=28)
+        date_filter = f"AND DATE(r.DateOpened) >= '{four_weeks_ago.strftime('%Y-%m-%d')}'"
+        week_label = "Last 4 Weeks"
+    else:
+        date_filter = ""
+        week_label = "All Time"
+    
+    # Total RMAs
+    cur.execute(f"SELECT COUNT(*) FROM rmas r WHERE 1=1 {date_filter}")
+    total_rmas = cur.fetchone()[0]
+    
+    # Status breakdown
+    cur.execute(f"""
+        SELECT Status, COUNT(*) as count
+        FROM rmas r
+        WHERE 1=1 {date_filter}
+        GROUP BY Status
+        ORDER BY count DESC
+    """)
+    status_breakdown = cur.fetchall()
+    
+    # Return type breakdown
+    cur.execute(f"""
+        SELECT ReturnType, COUNT(*) as count
+        FROM rmas r
+        WHERE ReturnType IS NOT NULL {date_filter}
+        GROUP BY ReturnType
+        ORDER BY count DESC
+    """)
+    return_type_breakdown = cur.fetchall()
+    
+    # Credit approvals
+    cur.execute(f"""
+        SELECT COUNT(*) 
+        FROM rmas r
+        WHERE CreditApproved = 1 {date_filter}
+    """)
+    credit_approved_count = cur.fetchone()[0]
+    
+    cur.execute(f"""
+        SELECT COUNT(*) 
+        FROM rmas r
+        WHERE ReturnType = 'Credit' {date_filter}
+    """)
+    credit_requested_count = cur.fetchone()[0]
+    
+    # Average time to close (only closed RMAs)
+    cur.execute(f"""
+        SELECT DateOpened, DateClosed
+        FROM rmas r
+        WHERE Status = 'Closed' AND DateClosed IS NOT NULL {date_filter}
+    """)
+    closed_rmas = cur.fetchall()
+    
+    avg_days_to_close = None
+    if closed_rmas:
+        total_days = 0
+        for rma in closed_rmas:
+            try:
+                opened = datetime.strptime(rma['DateOpened'], "%Y-%m-%d %H:%M:%S")
+                closed = datetime.strptime(rma['DateClosed'], "%Y-%m-%d %H:%M:%S")
+                total_days += (closed - opened).days
+            except:
+                pass
+        if len(closed_rmas) > 0:
+            avg_days_to_close = round(total_days / len(closed_rmas), 1)
+    
+    # Top customers by RMA count
+    cur.execute(f"""
+        SELECT c.CustomerName, COUNT(r.RMAID) as rma_count
+        FROM rmas r
+        JOIN customers c ON r.CustomerID = c.CustomerID
+        WHERE 1=1 {date_filter}
+        GROUP BY c.CustomerID
+        ORDER BY rma_count DESC
+        LIMIT 10
+    """)
+    top_customers = cur.fetchall()
+    
+    # Owner workload
+    cur.execute(f"""
+        SELECT o.OwnerName, 
+               COUNT(r.RMAID) as total,
+               SUM(CASE WHEN r.Status NOT IN ('Closed', 'Rejected') THEN 1 ELSE 0 END) as active
+        FROM internal_owners o
+        LEFT JOIN rmas r ON o.OwnerID = r.InternalOwnerID AND (1=1 {date_filter.replace('r.DateOpened', 'DateOpened') if date_filter else ''})
+        GROUP BY o.OwnerID
+        ORDER BY active DESC, total DESC
+    """)
+    owner_workload = cur.fetchall()
+    
+    # Disposition breakdown
+    cur.execute(f"""
+        SELECT d.Disposition, COUNT(*) as count
+        FROM dispositions d
+        JOIN rma_lines l ON d.RMALineID = l.RMALineID
+        JOIN rmas r ON l.RMAID = r.RMAID
+        WHERE d.Disposition IS NOT NULL {date_filter}
+        GROUP BY d.Disposition
+        ORDER BY count DESC
+    """)
+    disposition_breakdown = cur.fetchall()
+    
+    # RMAs with dispositions vs without
+    cur.execute(f"""
+        SELECT COUNT(DISTINCT r.RMAID)
+        FROM rmas r
+        WHERE EXISTS (
+            SELECT 1 FROM rma_lines l
+            JOIN dispositions d ON l.RMALineID = d.RMALineID
+            WHERE l.RMAID = r.RMAID AND d.Disposition IS NOT NULL
+        ) {date_filter}
+    """)
+    rmas_with_dispositions = cur.fetchone()[0]
+    
+    cur.execute(f"""
+        SELECT COUNT(DISTINCT r.RMAID)
+        FROM rmas r
+        WHERE EXISTS (
+            SELECT 1 FROM rma_lines l
+            WHERE l.RMAID = r.RMAID
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM rma_lines l
+            JOIN dispositions d ON l.RMALineID = d.RMALineID
+            WHERE l.RMAID = r.RMAID AND d.Disposition IS NOT NULL
+        ) {date_filter}
+    """)
+    rmas_without_dispositions = cur.fetchone()[0]
+    
+    conn.close()
+    
+    return render_template(
+        "metrics.html",
+        week=week,
+        week_label=week_label,
+        total_rmas=total_rmas,
+        status_breakdown=status_breakdown,
+        return_type_breakdown=return_type_breakdown,
+        credit_approved_count=credit_approved_count,
+        credit_requested_count=credit_requested_count,
+        avg_days_to_close=avg_days_to_close,
+        top_customers=top_customers,
+        owner_workload=owner_workload,
+        disposition_breakdown=disposition_breakdown,
+        rmas_with_dispositions=rmas_with_dispositions,
+        rmas_without_dispositions=rmas_without_dispositions
+    )
+
+
+
+# ============ RMA LIST & SEARCH ============
+@app.route("/rmas")
+@login_required
+def list_rmas():
+    status = request.args.get("status")
+    search = request.args.get("search", "").strip()
+    customer_id = request.args.get("customer_id")
+    return_type = request.args.get("return_type")
+    owner_id = request.args.get("owner_id")
+    date_from = request.args.get("date_from")
+    date_to = request.args.get("date_to")
+
+    conn = get_db()
+    cur = conn.cursor()
+    
+    # Dropdown data
+    cur.execute("SELECT * FROM customers ORDER BY CustomerName")
+    customers = cur.fetchall()
+    
+    cur.execute("SELECT * FROM internal_owners ORDER BY OwnerName")
+    owners = cur.fetchall()
+
+    # Base query
+    query = """
+        SELECT r.*, c.CustomerName, o.OwnerName, u.FullName as CreatedByName
+        FROM rmas r
+        JOIN customers c ON r.CustomerID = c.CustomerID
+        LEFT JOIN internal_owners o ON r.InternalOwnerID = o.OwnerID
+        LEFT JOIN users u ON r.CreatedByUserID = u.UserID
+        WHERE 1=1
+    """
+    params = []
+    
+    # Filters
+    if status:
+        query += " AND r.Status = ?"
+        params.append(status)
+    
+    if return_type:
+        query += " AND r.ReturnType = ?"
+        params.append(return_type)
+    
+    if customer_id:
+        query += " AND r.CustomerID = ?"
+        params.append(customer_id)
+    
+    if owner_id:
+        query += " AND r.InternalOwnerID = ?"
+        params.append(owner_id)
+    
+    if date_from:
+        query += " AND DATE(r.DateOpened) >= ?"
+        params.append(date_from)
+    
+    if date_to:
+        query += " AND DATE(r.DateOpened) <= ?"
+        params.append(date_to)
+    
+    # ------------- SEARCH -------------
+    if search:
+        search_text = f"%{search}%"
+        exact_rma = search.strip()
+
+        # clause reused in WHERE and ORDER BY for line items
+        line_clause = """
+            EXISTS (
+                SELECT 1 FROM rma_lines l
+                WHERE l.RMAID = r.RMAID
+                  AND (
+                      l.PartNumber      LIKE ?
+                      OR l.ToolNumber   LIKE ?
+                      OR l.ItemDescription LIKE ?
+                  )
+            )
+        """
+
+        # WHERE: match if ANYTHING contains the text
+        query += f""" AND (
+            CAST(r.RMAID AS TEXT) LIKE ?
+            OR ('RMA' || printf('%04d', r.RMAID)) LIKE ?
+            OR c.CustomerName LIKE ?
+            OR r.CustomerComplaintDesc LIKE ?
+            OR o.OwnerName LIKE ?
+            OR {line_clause}
+        )"""
+
+        # Params for WHERE:
+        #   RMAID, formatted RMA, customer, complaint, owner,
+        #   line: part, tool, desc
+        params.extend([
+            search_text,  # CAST(r.RMAID AS TEXT) LIKE ?
+            search_text,  # 'RMA0001' style
+            search_text,  # CustomerName
+            search_text,  # Complaint
+            search_text,  # OwnerName
+            search_text,  # PartNumber
+            search_text,  # ToolNumber
+            search_text   # ItemDescription
+        ])
+
+        # ORDER BY: group "more relevant" matches higher
+        query += f"""
+            ORDER BY
+              CASE
+                -- exact formatted RMA match (if user literally typed "RMA0005")
+                WHEN ('RMA' || printf('%04d', r.RMAID)) = ? THEN 0
+
+                -- formatted RMA contains the search
+                WHEN ('RMA' || printf('%04d', r.RMAID)) LIKE ? THEN 1
+
+                -- plain numeric RMA ID contains the search
+                WHEN CAST(r.RMAID AS TEXT) LIKE ? THEN 2
+
+                -- line items (part/tool/description) contain it
+                WHEN {line_clause} THEN 3
+
+                -- customer name
+                WHEN c.CustomerName LIKE ? THEN 4
+
+                -- complaint text
+                WHEN r.CustomerComplaintDesc LIKE ? THEN 5
+
+                -- owner name
+                WHEN o.OwnerName LIKE ? THEN 6
+
+                ELSE 7
+              END,
+              r.DateOpened DESC
+        """
+
+        # Params for ORDER BY
+        params.extend([
+            exact_rma,    # exact formatted RMA (if matches)
+            search_text,  # formatted RMA LIKE
+            search_text,  # RMAID LIKE
+            search_text,  # line: PartNumber
+            search_text,  # line: ToolNumber
+            search_text,  # line: ItemDescription
+            search_text,  # CustomerName
+            search_text,  # Complaint
+            search_text   # OwnerName
+        ])
+    else:
+        # No search → newest first
+        query += " ORDER BY r.DateOpened DESC"
+    
+    cur.execute(query, params)
+    rmas = cur.fetchall()
+    conn.close()
+    
+    return render_template(
+        "rma_list.html",
+        rmas=rmas,
+        customers=customers,
+        owners=owners,
+        status_options=STATUS_OPTIONS,
+        current_status=status,
+        current_return_type=return_type,
+        current_search=search,
+        current_customer=customer_id,
+        current_owner=owner_id,
+        current_date_from=date_from,
+        current_date_to=date_to
+    )
+
+
+# ============ VIEW RMA DETAIL ============
+
+@app.route("/rmas/<int:rma_id>")
+@login_required
+def view_rma(rma_id):
+    edit_mode = request.args.get("edit") == "1"
+    edit_line = request.args.get("edit_line")
+    show_notes_history = request.args.get("notes_history") == "1"
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT r.*, c.CustomerName, o.OwnerName, o.OwnerEmail, u.FullName as CreatedByName
+        FROM rmas r
+        JOIN customers c ON r.CustomerID = c.CustomerID
+        LEFT JOIN internal_owners o ON r.InternalOwnerID = o.OwnerID
+        LEFT JOIN users u ON r.CreatedByUserID = u.UserID
+        WHERE r.RMAID = ?
+    """, (rma_id,))
+    rma = cur.fetchone()
+
+    if rma is None:
+        conn.close()
+        return "RMA not found", 404
+
+    cur.execute("""
+        SELECT l.*, d.DispositionID, d.Disposition, d.FailureCode, 
+               d.FailureDescription, d.RootCause, d.CorrectiveAction,
+               d.QtyScrap, d.QtyRework, d.QtyReplace, d.DateDispositioned, d.DispositionBy
+        FROM rma_lines l
+        LEFT JOIN dispositions d ON l.RMALineID = d.RMALineID
+        WHERE l.RMAID = ?
+    """, (rma_id,))
+    lines = cur.fetchall()
+
+    cur.execute("""
+        SELECT * FROM status_history
+        WHERE RMAID = ?
+        ORDER BY ChangedOn DESC
+    """, (rma_id,))
+    statuses = cur.fetchall()
+
+    cur.execute("""
+        SELECT * FROM notes_history
+        WHERE RMAID = ?
+        ORDER BY ModifiedOn DESC
+    """, (rma_id,))
+    notes_history = cur.fetchall()
+
+    cur.execute("""
+        SELECT * FROM attachments
+        WHERE RMAID = ?
+        ORDER BY DateAdded DESC
+    """, (rma_id,))
+    attachments = cur.fetchall()
+
+    cur.execute("SELECT * FROM customers ORDER BY CustomerName")
+    customers = cur.fetchall()
+    
+    cur.execute("SELECT * FROM internal_owners ORDER BY OwnerName")
+    owners = cur.fetchall()
+
+    conn.close()
+
+    return render_template(
+        "rma_detail.html",
+        rma=rma,
+        lines=lines,
+        statuses=statuses,
+        notes_history=notes_history,
+        attachments=attachments,
+        customers=customers,
+        owners=owners,
+        status_options=STATUS_OPTIONS,
+        edit_mode=edit_mode,
+        edit_line=int(edit_line) if edit_line else None,
+        show_notes_history=show_notes_history
+    )
+
+
+# ============ CREATE NEW RMA ============
+
+@app.route("/rmas/new", methods=["GET", "POST"])
+@login_required
+def new_rma():
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT * FROM customers ORDER BY CustomerName")
+    customers = cur.fetchall()
+    
+    cur.execute("SELECT * FROM internal_owners ORDER BY OwnerName")
+    owners = cur.fetchall()
+
+    if request.method == "POST":
+        customer_id = request.form["customer_id"]
+        owner_id = request.form.get("owner_id") or None
+        complaint = request.form.get("complaint", "")
+        return_type = request.form.get("return_type", "TBD")
+        internal_notes = request.form.get("internal_notes", "")
+
+        date_opened = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        status = "Draft"
+
+        cur.execute("""
+            INSERT INTO rmas
+            (CustomerID, CreatedByUserID, DateOpened, Status, ReturnType, 
+             InternalOwnerID, CustomerComplaintDesc, InternalNotes, NotesLastModified, NotesModifiedBy)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            customer_id, session['user_id'], date_opened, status, return_type, 
+            owner_id, complaint, internal_notes, 
+            date_opened if internal_notes else None,
+            session['full_name'] if internal_notes else None
+        ))
+
+        rma_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO status_history (RMAID, Status, ChangedBy, ChangedOn, Comment)
+            VALUES (?, ?, ?, ?, ?)
+        """, (rma_id, "Draft", session['full_name'], date_opened, "RMA created"))
+
+
+        if internal_notes:
+            cur.execute("""
+                INSERT INTO notes_history (RMAID, NotesContent, ModifiedBy, ModifiedOn)
+                VALUES (?, ?, ?, ?)
+            """, (rma_id, internal_notes, session['full_name'], date_opened))
+
+        conn.commit()
+        
+        if owner_id:
+            cur.execute("SELECT OwnerName, OwnerEmail FROM internal_owners WHERE OwnerID = ?", (owner_id,))
+            owner = cur.fetchone()
+            if owner:
+                cur.execute("SELECT CustomerName FROM customers WHERE CustomerID = ?", (customer_id,))
+                customer = cur.fetchone()
+                rma_code = f"RMA{rma_id:04d}"
+                send_rma_notification(
+                    owner['OwnerEmail'], owner['OwnerName'], rma_id, rma_code,
+                    customer['CustomerName'], return_type, complaint, session['full_name']
+                )
+        
+        conn.close()
+        flash(f'RMA{rma_id:04d} created successfully.', 'success')
+        return redirect(url_for("view_rma", rma_id=rma_id))
+
+    conn.close()
+    return render_template("rma_new.html", customers=customers, owners=owners)
+
+
+# ============ EDIT RMA HEADER ============
+
+@app.route("/rmas/<int:rma_id>/edit_inline", methods=["POST"])
+@login_required
+def edit_rma_inline(rma_id):
+    customer_id = request.form["customer_id"]
+    status = request.form.get("status", "Draft")
+    return_type = request.form.get("return_type", "TBD")
+    owner_id = request.form.get("owner_id") or None
+    complaint = request.form.get("complaint", "")
+    internal_notes = request.form.get("internal_notes", "")
+    credit_memo = request.form.get("credit_memo", "").strip() or None
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    # --------- UNDO SNAPSHOT: full header before change ---------
+    cur.execute("SELECT * FROM rmas WHERE RMAID = ?", (rma_id,))
+    before = cur.fetchone()
+
+    if not before:
+        conn.close()
+        flash("RMA not found.", "error")
+        return redirect(url_for("list_rmas"))
+
+    # Store enough to restore the header with undo_last("restore_rma_header")
+    session["last_undo"] = {
+        "action": "restore_rma_header",
+        "data": {
+            "RMAID": rma_id,
+            "CustomerID": before["CustomerID"],
+            "Status": before["Status"],
+            "ReturnType": before["ReturnType"],
+            "InternalOwnerID": before["InternalOwnerID"],
+            "CustomerComplaintDesc": before["CustomerComplaintDesc"],
+            "InternalNotes": before["InternalNotes"],
+            "CreditMemoNumber": before["CreditMemoNumber"],
+            "NotesLastModified": before["NotesLastModified"],
+            "NotesModifiedBy": before["NotesModifiedBy"],
+        },
+    }
+
+    old_status = before["Status"]
+    old_notes = before["InternalNotes"] or ""
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    notes_modified = (old_notes != (internal_notes or ""))
+
+    # --------- MAIN UPDATE ---------
+    cur.execute("""
+        UPDATE rmas
+        SET CustomerID = ?,
+            Status = ?,
+            ReturnType = ?,
+            InternalOwnerID = ?,
+            CustomerComplaintDesc = ?,
+            InternalNotes = ?,
+            CreditMemoNumber = ?,
+            NotesLastModified = CASE WHEN ? THEN ? ELSE NotesLastModified END,
+            NotesModifiedBy = CASE WHEN ? THEN ? ELSE NotesModifiedBy END
+        WHERE RMAID = ?
+    """, (
+        customer_id,
+        status,
+        return_type,
+        owner_id,
+        complaint,
+        internal_notes,
+        credit_memo,
+        notes_modified, now,
+        notes_modified, session['full_name'],
+        rma_id,
+    ))
+
+    # If status is set to Draft, also "un-acknowledge" this RMA
+    if status == "Draft":
+        cur.execute("""
+            UPDATE rmas
+            SET Acknowledged = 0,
+                AcknowledgedOn = NULL
+            WHERE RMAID = ?
+        """, (rma_id,))
+
+    # --------- NOTES HISTORY ---------
+    if notes_modified and internal_notes:
+        cur.execute("""
+            INSERT INTO notes_history (RMAID, NotesContent, ModifiedBy, ModifiedOn)
+            VALUES (?, ?, ?, ?)
+        """, (rma_id, internal_notes, session['full_name'], now))
+
+    # --------- STATUS HISTORY ---------
+    if old_status != status:
+        cur.execute("""
+            INSERT INTO status_history (RMAID, Status, ChangedBy, ChangedOn, Comment)
+            VALUES (?, ?, ?, ?, ?)
+        """, (rma_id, status, session['full_name'], now, f"Status changed to {status}"))
+
+    conn.commit()
+    conn.close()
+
+    flash("RMA header updated.", "success")
+    return redirect(url_for("view_rma", rma_id=rma_id))
+
+
+# ============ UPDATE STATUS ============
+
+@app.route("/rmas/<int:rma_id>/status", methods=["POST"])
+@login_required
+def update_status(rma_id):
+    new_status = request.form.get("status")
+    comment = request.form.get("comment", "")
+    
+    if new_status not in STATUS_OPTIONS:
+        flash('Invalid status.', 'error')
+        return redirect(url_for("view_rma", rma_id=rma_id))
+    
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    conn = get_db()
+    cur = conn.cursor()
+
+    # --- 1) Get current status info so we can UNDO later ---
+    cur.execute("""
+        SELECT Status, DateClosed, ClosedBy
+        FROM rmas
+        WHERE RMAID = ?
+    """, (rma_id,))
+    before = cur.fetchone()
+
+    if before is None:
+        conn.close()
+        flash("RMA not found.", "error")
+        return redirect(url_for("list_rmas"))
+
+    # If status is actually changing, store undo payload
+    if before["Status"] != new_status:
+        session["last_undo"] = {
+            "action": "restore_status",
+            "data": {
+                "RMAID": rma_id,
+                "Status": before["Status"],
+                "DateClosed": before["DateClosed"],
+                "ClosedBy": before["ClosedBy"],
+            },
+        }
+    else:
+        # No change → nothing useful to undo from THIS action
+        session.pop("last_undo", None)
+
+    # --- 2) Apply the new status ---
+    update_fields = "Status = ?"
+    update_params = [new_status]
+
+    if new_status == 'Closed':
+        update_fields += ", DateClosed = ?, ClosedBy = ?"
+        update_params.extend([now, session['full_name']])
+    else:
+        update_fields += ", DateClosed = NULL, ClosedBy = NULL"
+
+    # If we go back to Draft, also “un-acknowledge” the RMA
+    if new_status == 'Draft':
+        update_fields += ", Acknowledged = 0, AcknowledgedOn = NULL"
+
+    update_params.append(rma_id)
+
+    cur.execute(f"UPDATE rmas SET {update_fields} WHERE RMAID = ?", update_params)
+
+    # --- 3) Log to status_history ---
+    cur.execute("""
+        INSERT INTO status_history (RMAID, Status, ChangedBy, ChangedOn, Comment)
+        VALUES (?, ?, ?, ?, ?)
+    """, (
+        rma_id,
+        new_status,
+        session['full_name'],
+        now,
+        comment or f"Status changed to {new_status}"
+    ))
+    
+    conn.commit()
+    conn.close()
+    
+    flash(f'Status updated to {new_status}.', 'success')
+    return redirect(url_for("view_rma", rma_id=rma_id))
+
+
+
+# ============ DELETE STATUS HISTORY ENTRY ============
+
+@app.route("/rmas/<int:rma_id>/status_history/<int:history_id>/delete", methods=["POST"])
+@login_required
+def delete_status_history_entry(rma_id, history_id):
+    """
+    Delete a single row from status_history for this RMA.
+    Also store an undo payload in the session so the user can restore it.
+    """
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Fetch the row first
+    cur.execute("""
+        SELECT *
+        FROM status_history
+        WHERE StatusHistID = ? AND RMAID = ?
+    """, (history_id, rma_id))
+    row = cur.fetchone()
+
+    if not row:
+        conn.close()
+        flash("Status history entry not found.", "error")
+        return redirect(url_for("view_rma", rma_id=rma_id))
+
+    # Store undo info in the session
+    session["last_undo"] = {
+        "action": "delete_status_history",
+        "data": {
+            "StatusHistID": row["StatusHistID"],
+            "RMAID": row["RMAID"],
+            "Status": row["Status"],
+            "ChangedBy": row["ChangedBy"],
+            "ChangedOn": row["ChangedOn"],
+            "Comment": row["Comment"],
+        },
+    }
+
+    # Delete the row
+    cur.execute("""
+        DELETE FROM status_history
+        WHERE StatusHistID = ? AND RMAID = ?
+    """, (history_id, rma_id))
+
+    if cur.rowcount > 0:
+        flash("Status history entry deleted.", "info")
+    else:
+        flash("Nothing was deleted.", "warning")
+        session.pop("last_undo", None)  # Remove useless undo
+
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("view_rma", rma_id=rma_id))
+
+
+
+# ============ ACKNOWLEDGE RMA ============
+
+@app.route("/rmas/<int:rma_id>/acknowledge", methods=["POST"])
+@login_required
+def acknowledge_rma(rma_id):
+    """Mark an RMA as acknowledged and set Status = 'Acknowledged', with Undo support."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Get current fields so we can UNDO
+    cur.execute("""
+        SELECT Status, DateClosed, ClosedBy, Acknowledged, AcknowledgedOn
+        FROM rmas
+        WHERE RMAID = ?
+    """, (rma_id,))
+    row = cur.fetchone()
+
+    if not row:
+        conn.close()
+        flash("RMA not found.", "error")
+        return redirect(url_for("list_rmas"))
+
+    # ----- UNDO SNAPSHOT -----
+    # Store everything we might change so Undo can put it back.
+    session["last_undo"] = {
+        "action": "restore_ack",
+        "data": {
+            "RMAID": rma_id,
+            "Status": row["Status"],
+            "DateClosed": row["DateClosed"],
+            "ClosedBy": row["ClosedBy"],
+            "Acknowledged": row["Acknowledged"],
+            "AcknowledgedOn": row["AcknowledgedOn"],
+            # we’ll fill this if we create a status_history row
+            "StatusHistID": None,
+        },
+    }
+
+    current_status = row["Status"]
+
+    if current_status != "Acknowledged":
+        # Update status + ack flag
+        cur.execute("""
+            UPDATE rmas
+            SET Acknowledged   = 1,
+                AcknowledgedOn = ?,
+                Status         = 'Acknowledged'
+            WHERE RMAID = ?
+        """, (now, rma_id))
+
+        # Add status history entry
+        cur.execute("""
+            INSERT INTO status_history (RMAID, Status, ChangedBy, ChangedOn, Comment)
+            VALUES (?, ?, ?, ?, ?)
+        """, (rma_id, "Acknowledged", session["full_name"], now, "Marked as acknowledged"))
+
+        # Capture the history row ID so Undo can delete it if we roll back
+        status_hist_id = cur.lastrowid
+        session["last_undo"]["data"]["StatusHistID"] = status_hist_id
+
+    else:
+        # Already in Acknowledged status – just flip flag/timestamp
+        cur.execute("""
+            UPDATE rmas
+            SET Acknowledged   = 1,
+                AcknowledgedOn = ?
+            WHERE RMAID = ?
+        """, (now, rma_id))
+
+    conn.commit()
+    conn.close()
+
+    flash("RMA marked as acknowledged.", "success")
+    return redirect(url_for("view_rma", rma_id=rma_id))
+
+
+# ============ APPROVE CREDIT ============
+
+@app.route("/rmas/<int:rma_id>/approve_credit", methods=["POST"])
+@login_required
+def approve_credit(rma_id):
+    """Mark an RMA as having credit approved"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    conn = get_db()
+    cur = conn.cursor()
+    
+    # Get current status
+    cur.execute("""
+        SELECT CreditApproved, CreditApprovedOn, CreditApprovedBy
+        FROM rmas
+        WHERE RMAID = ?
+    """, (rma_id,))
+    row = cur.fetchone()
+    
+    if not row:
+        conn.close()
+        flash("RMA not found.", "error")
+        return redirect(url_for("list_rmas"))
+    
+    # Store undo info
+    session["last_undo"] = {
+        "action": "restore_credit_approval",
+        "data": {
+            "RMAID": rma_id,
+            "CreditApproved": row["CreditApproved"],
+            "CreditApprovedOn": row["CreditApprovedOn"],
+            "CreditApprovedBy": row["CreditApprovedBy"],
+        },
+    }
+    
+    # Toggle credit approval
+    new_status = 0 if row["CreditApproved"] else 1
+    
+    if new_status:
+        cur.execute("""
+            UPDATE rmas
+            SET CreditApproved = 1,
+                CreditApprovedOn = ?,
+                CreditApprovedBy = ?
+            WHERE RMAID = ?
+        """, (now, session["full_name"], rma_id))
+        flash("Credit approved.", "success")
+    else:
+        cur.execute("""
+            UPDATE rmas
+            SET CreditApproved = 0,
+                CreditApprovedOn = NULL,
+                CreditApprovedBy = NULL
+            WHERE RMAID = ?
+        """, (rma_id,))
+        flash("Credit approval removed.", "info")
+    
+    conn.commit()
+    conn.close()
+    
+    return redirect(url_for("view_rma", rma_id=rma_id))
+
+
+# ============ DELETE RMA ============
+
+@app.route("/rmas/<int:rma_id>/delete", methods=["POST"])
+@login_required
+def delete_rma(rma_id):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM rmas WHERE RMAID = ?", (rma_id,))
+    conn.commit()
+    conn.close()
+    flash('RMA deleted.', 'info')
+    return redirect(url_for("list_rmas"))
+
+# ============ UNDO LAST ACTION ============
+
+@app.route("/undo_last", methods=["POST"])
+@login_required
+def undo_last():
+    undo = session.get("last_undo")
+    if not undo:
+        flash("Nothing to undo.", "warning")
+        return redirect(request.referrer or url_for("index"))
+
+    action = undo.get("action")
+    data = undo.get("data", {})
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        # 1) Undo delete_status_history
+        if action == "delete_status_history":
+            cur.execute("""
+                INSERT INTO status_history
+                    (StatusHistID, RMAID, Status, ChangedBy, ChangedOn, Comment)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                data["StatusHistID"],
+                data["RMAID"],
+                data["Status"],
+                data["ChangedBy"],
+                data["ChangedOn"],
+                data["Comment"],
+            ))
+            rma_id = data["RMAID"]
+
+        # 2) Undo status change (update_status)
+        elif action == "restore_status":
+            cur.execute("""
+                UPDATE rmas
+                SET Status = ?, DateClosed = ?, ClosedBy = ?
+                WHERE RMAID = ?
+            """, (
+                data["Status"],
+                data["DateClosed"],
+                data["ClosedBy"],
+                data["RMAID"],
+            ))
+            rma_id = data["RMAID"]
+
+            # optional: log that we restored
+            cur.execute("""
+                INSERT INTO status_history (RMAID, Status, ChangedBy, ChangedOn, Comment)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                rma_id,
+                data["Status"],
+                session['full_name'],
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "Status restored via Undo",
+            ))
+
+        # 3) Undo header edit (edit_rma_inline)
+        elif action == "restore_rma_header":
+            cur.execute("""
+                UPDATE rmas
+                SET CustomerID = ?,
+                    Status = ?,
+                    ReturnType = ?,
+                    InternalOwnerID = ?,
+                    CustomerComplaintDesc = ?,
+                    InternalNotes = ?,
+                    CreditMemoNumber = ?,
+                    NotesLastModified = ?,
+                    NotesModifiedBy = ?
+                WHERE RMAID = ?
+            """, (
+                data["CustomerID"],
+                data["Status"],
+                data["ReturnType"],
+                data["InternalOwnerID"],
+                data["CustomerComplaintDesc"],
+                data["InternalNotes"],
+                data.get("CreditMemoNumber"),
+                data["NotesLastModified"],
+                data["NotesModifiedBy"],
+                data["RMAID"],
+            ))
+            rma_id = data["RMAID"]
+        
+        # 3b) Undo credit approval
+        elif action == "restore_credit_approval":
+            cur.execute("""
+                UPDATE rmas
+                SET CreditApproved = ?,
+                    CreditApprovedOn = ?,
+                    CreditApprovedBy = ?
+                WHERE RMAID = ?
+            """, (
+                data["CreditApproved"],
+                data["CreditApprovedOn"],
+                data["CreditApprovedBy"],
+                data["RMAID"],
+            ))
+            rma_id = data["RMAID"]
+
+        # 4) Undo line delete (delete_line)
+        elif action == "restore_line":
+            cur.execute("""
+                INSERT INTO rma_lines
+                    (RMALineID, RMAID, PartNumber, ToolNumber, ItemDescription,
+                     QtyAffected, POLotNumber, TotalCost)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                data["RMALineID"],
+                data["RMAID"],
+                data["PartNumber"],
+                data["ToolNumber"],
+                data["ItemDescription"],
+                data["QtyAffected"],
+                data["POLotNumber"],
+                data["TotalCost"],
+            ))
+            rma_id = data["RMAID"]
+
+        # 5) Undo attachment delete (delete_attachment)
+        elif action == "restore_attachment":
+            # Move file back from trash if we have it
+            trash_path = data.get("TrashPath")
+            file_path = data["FilePath"]
+            if trash_path and os.path.exists(trash_path):
+                try:
+                    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                    shutil.move(trash_path, file_path)
+                except Exception as e:
+                    print(f"[UNDO ATTACHMENT] Could not move file back from trash: {e}")
+
+            cur.execute("""
+                INSERT INTO attachments
+                    (AttachmentID, RMAID, FilePath, AttachmentType, AddedBy, DateAdded)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                data["AttachmentID"],
+                data["RMAID"],
+                data["FilePath"],
+                data["AttachmentType"],
+                data["AddedBy"],
+                data["DateAdded"],
+            ))
+            rma_id = data["RMAID"]
+
+        else:
+            conn.close()
+            session.pop("last_undo", None)
+            flash("Nothing to undo for this action.", "warning")
+            return redirect(request.referrer or url_for("index"))
+
+        conn.commit()
+        conn.close()
+
+        # Clear undo so it doesn't repeat
+        session.pop("last_undo", None)
+
+        flash("Last action undone.", "info")
+        return redirect(url_for("view_rma", rma_id=rma_id))
+
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        session.pop("last_undo", None)
+        print("[UNDO ERROR]", e)
+        flash("Could not undo last action.", "error")
+        return redirect(request.referrer or url_for("index"))
+
+# ============ LINE ITEMS ============
+
+@app.route("/rmas/<int:rma_id>/lines/add", methods=["POST"])
+@login_required
+def add_line(rma_id):
+    part_number = request.form.get("part_number", "")
+    tool_number = request.form.get("tool_number", "")
+    item_description = request.form.get("item_description", "")
+    qty_affected = request.form.get("qty_affected", 0) or 0
+    po_lot_number = request.form.get("po_lot_number", "")
+    total_cost = request.form.get("total_cost", 0) or 0
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO rma_lines (RMAID, PartNumber, ToolNumber, ItemDescription, QtyAffected, POLotNumber, TotalCost)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (rma_id, part_number, tool_number, item_description, qty_affected, po_lot_number, total_cost))
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("view_rma", rma_id=rma_id))
+
+
+@app.route("/rmas/<int:rma_id>/lines/<int:line_id>/edit", methods=["POST"])
+@login_required
+def edit_line(rma_id, line_id):
+    part_number = request.form.get("part_number", "")
+    tool_number = request.form.get("tool_number", "")
+    item_description = request.form.get("item_description", "")
+    qty_affected = request.form.get("qty_affected", 0) or 0
+    po_lot_number = request.form.get("po_lot_number", "")
+    total_cost = request.form.get("total_cost", 0) or 0
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE rma_lines
+        SET PartNumber = ?, ToolNumber = ?, ItemDescription = ?, QtyAffected = ?, POLotNumber = ?, TotalCost = ?
+        WHERE RMALineID = ? AND RMAID = ?
+    """, (part_number, tool_number, item_description, qty_affected, po_lot_number, total_cost, line_id, rma_id))
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("view_rma", rma_id=rma_id))
+
+
+@app.route("/rmas/<int:rma_id>/lines/<int:line_id>/delete", methods=["POST"])
+@login_required
+def delete_line(rma_id, line_id):
+    conn = get_db()
+    cur = conn.cursor()
+
+    # --------- UNDO SNAPSHOT: line before delete ---------
+    cur.execute("""
+        SELECT *
+        FROM rma_lines
+        WHERE RMALineID = ? AND RMAID = ?
+    """, (line_id, rma_id))
+    row = cur.fetchone()
+
+    if row:
+        session["last_undo"] = {
+            "action": "restore_line",
+            "data": {
+                "RMALineID": row["RMALineID"],
+                "RMAID": row["RMAID"],
+                "PartNumber": row["PartNumber"],
+                "ToolNumber": row["ToolNumber"],
+                "ItemDescription": row["ItemDescription"],
+                "QtyAffected": row["QtyAffected"],
+                "POLotNumber": row["POLotNumber"],
+                "TotalCost": row["TotalCost"],
+            },
+        }
+    else:
+        session.pop("last_undo", None)
+
+    # --------- Actual delete ---------
+    cur.execute("DELETE FROM rma_lines WHERE RMALineID = ? AND RMAID = ?", (line_id, rma_id))
+    conn.commit()
+    conn.close()
+
+    flash("Line item deleted.", "info")
+    return redirect(url_for("view_rma", rma_id=rma_id))
+
+
+# ============ DISPOSITIONS ============
+
+@app.route("/rmas/<int:rma_id>/lines/<int:line_id>/disposition", methods=["POST"])
+@login_required
+def add_disposition(rma_id, line_id):
+    disposition = request.form.get("disposition", "")
+    failure_code = request.form.get("failure_code", "")
+    failure_desc = request.form.get("failure_description", "")
+    root_cause = request.form.get("root_cause", "")
+    corrective_action = request.form.get("corrective_action", "")
+    qty_scrap = request.form.get("qty_scrap", 0) or 0
+    qty_rework = request.form.get("qty_rework", 0) or 0
+    qty_replace = request.form.get("qty_replace", 0) or 0
+    
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    conn = get_db()
+    cur = conn.cursor()
+    
+    cur.execute("SELECT DispositionID FROM dispositions WHERE RMALineID = ?", (line_id,))
+    existing = cur.fetchone()
+    
+    if existing:
+        cur.execute("""
+            UPDATE dispositions
+            SET Disposition = ?, FailureCode = ?, FailureDescription = ?,
+                RootCause = ?, CorrectiveAction = ?, QtyScrap = ?,
+                QtyRework = ?, QtyReplace = ?, DateDispositioned = ?, DispositionBy = ?
+            WHERE RMALineID = ?
+        """, (disposition, failure_code, failure_desc, root_cause, corrective_action,
+              qty_scrap, qty_rework, qty_replace, now, session['full_name'], line_id))
+    else:
+        cur.execute("""
+            INSERT INTO dispositions
+            (RMALineID, Disposition, FailureCode, FailureDescription, RootCause,
+             CorrectiveAction, QtyScrap, QtyRework, QtyReplace, DateDispositioned, DispositionBy)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (line_id, disposition, failure_code, failure_desc, root_cause,
+              corrective_action, qty_scrap, qty_rework, qty_replace, now, session['full_name']))
+
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("view_rma", rma_id=rma_id))
+
+
+# ============ ATTACHMENTS ============
+
+@app.route("/rmas/<int:rma_id>/attachments/add", methods=["POST"])
+@login_required
+def add_attachment(rma_id):
+    file = request.files.get('file')
+
+    if not file or file.filename == '':
+        return redirect(url_for('view_rma', rma_id=rma_id))
+
+    if not allowed_file(file.filename):
+        flash('File type not allowed.', 'error')
+        return redirect(url_for('view_rma', rma_id=rma_id))
+
+    rma_folder = os.path.join(app.config['UPLOAD_FOLDER'], str(rma_id))
+    os.makedirs(rma_folder, exist_ok=True)
+
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(rma_folder, filename)
+    file.save(file_path)
+
+    extension = filename.rsplit('.', 1)[1].lower()
+    desc_type = "Image" if extension in ("jpg", "jpeg", "png") else "PDF"
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO attachments (RMAID, FilePath, AttachmentType, AddedBy, DateAdded)
+        VALUES (?, ?, ?, ?, ?)
+    """, (rma_id, file_path, desc_type, session['full_name'], now))
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for('view_rma', rma_id=rma_id))
+
+
+@app.route('/uploads/<rma_id>/<filename>')
+@login_required
+def uploaded_file(rma_id, filename):
+    folder = os.path.join(app.config['UPLOAD_FOLDER'], rma_id)
+    return send_from_directory(folder, filename)
+
+@app.route("/rmas/<int:rma_id>/attachments/<int:attachment_id>/delete", methods=["POST"])
+@login_required
+def delete_attachment(rma_id, attachment_id):
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Get the full row for undo + file path
+    cur.execute("""
+        SELECT *
+        FROM attachments
+        WHERE AttachmentID = ? AND RMAID = ?
+    """, (attachment_id, rma_id))
+    row = cur.fetchone()
+
+    if not row:
+        conn.close()
+        flash("Attachment not found.", "error")
+        return redirect(url_for("view_rma", rma_id=rma_id))
+
+    file_path = row["FilePath"]
+
+    # --------- Move file to trash instead of deleting ---------
+    trash_root = os.path.join(app.config['UPLOAD_FOLDER'], "_trash")
+    os.makedirs(trash_root, exist_ok=True)
+
+    filename_only = os.path.basename(file_path)
+    trash_path = os.path.join(trash_root, f"{attachment_id}_{filename_only}")
+
+    try:
+        if file_path and os.path.exists(file_path):
+            shutil.move(file_path, trash_path)
+        else:
+            trash_path = None  # nothing to restore
+    except Exception as e:
+        print(f"[ATTACHMENT DELETE] Could not move file to trash: {e}")
+        trash_path = None
+
+    # --------- UNDO SNAPSHOT: attachment row + trash path ---------
+    session["last_undo"] = {
+        "action": "restore_attachment",
+        "data": {
+            "AttachmentID": row["AttachmentID"],
+            "RMAID": row["RMAID"],
+            "FilePath": row["FilePath"],
+            "AttachmentType": row["AttachmentType"],
+            "AddedBy": row["AddedBy"],
+            "DateAdded": row["DateAdded"],
+            "TrashPath": trash_path,
+        },
+    }
+
+    # Delete DB record
+    cur.execute("""
+        DELETE FROM attachments 
+        WHERE AttachmentID = ? AND RMAID = ?
+    """, (attachment_id, rma_id))
+
+    conn.commit()
+    conn.close()
+
+    flash("Attachment deleted.", "info")
+    return redirect(url_for("view_rma", rma_id=rma_id))
+
+
+
+# ============ CUSTOMERS ============
+
+@app.route("/customers")
+@login_required
+def list_customers():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT c.*, 
+               COUNT(r.RMAID) as rma_count,
+               SUM(CASE WHEN r.Status != 'Closed' THEN 1 ELSE 0 END) as open_count
+        FROM customers c
+        LEFT JOIN rmas r ON c.CustomerID = r.CustomerID
+        GROUP BY c.CustomerID
+        ORDER BY c.CustomerName
+    """)
+    customers = cur.fetchall()
+    conn.close()
+    return render_template("customers.html", customers=customers)
+
+
+@app.route("/customers/new", methods=["GET", "POST"])
+@login_required
+def new_customer():
+    if request.method == "POST":
+        name = request.form.get("customer_name", "").strip()
+        contact_name = request.form.get("contact_name", "")
+        contact_email = request.form.get("contact_email", "")
+        
+        if not name:
+            flash('Customer name is required.', 'error')
+            return render_template("customer_new.html")
+        
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO customers (CustomerName, ContactName, ContactEmail) VALUES (?, ?, ?)",
+                   (name, contact_name, contact_email))
+        conn.commit()
+        conn.close()
+        
+        flash('Customer created.', 'success')
+        return redirect(url_for("list_customers"))
+    
+    return render_template("customer_new.html")
+
+
+@app.route("/customers/<int:customer_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_customer(customer_id):
+    conn = get_db()
+    cur = conn.cursor()
+    
+    if request.method == "POST":
+        name = request.form.get("customer_name", "").strip()
+        contact_name = request.form.get("contact_name", "")
+        contact_email = request.form.get("contact_email", "")
+        
+        cur.execute("UPDATE customers SET CustomerName = ?, ContactName = ?, ContactEmail = ? WHERE CustomerID = ?",
+                   (name, contact_name, contact_email, customer_id))
+        conn.commit()
+        conn.close()
+        
+        flash('Customer updated.', 'success')
+        return redirect(url_for("list_customers"))
+    
+    cur.execute("SELECT * FROM customers WHERE CustomerID = ?", (customer_id,))
+    customer = cur.fetchone()
+    conn.close()
+    
+    if not customer:
+        flash('Customer not found.', 'error')
+        return redirect(url_for("list_customers"))
+    
+    return render_template("customer_edit.html", customer=customer)
+
+
+@app.route("/customers/<int:customer_id>/delete", methods=["POST"])
+@login_required
+def delete_customer(customer_id):
+    conn = get_db()
+    cur = conn.cursor()
+    
+    cur.execute("SELECT COUNT(*) FROM rmas WHERE CustomerID = ?", (customer_id,))
+    if cur.fetchone()[0] > 0:
+        conn.close()
+        flash('Cannot delete customer with existing RMAs.', 'error')
+        return redirect(url_for("list_customers"))
+    
+    cur.execute("DELETE FROM customers WHERE CustomerID = ?", (customer_id,))
+    conn.commit()
+    conn.close()
+    
+    flash('Customer deleted.', 'info')
+    return redirect(url_for("list_customers"))
+
+
+# ============ INTERNAL OWNERS ============
+
+@app.route("/owners")
+@login_required
+def list_owners():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT o.*, 
+               COUNT(r.RMAID) as rma_count,
+               SUM(CASE WHEN r.Status != 'Closed' THEN 1 ELSE 0 END) as open_count,
+               SUM(CASE WHEN r.Status = 'Draft' THEN 1 ELSE 0 END) as pending_count
+        FROM internal_owners o
+        LEFT JOIN rmas r ON o.OwnerID = r.InternalOwnerID
+        GROUP BY o.OwnerID
+        ORDER BY o.OwnerName
+    """)
+    owners = cur.fetchall()
+    conn.close()
+    return render_template("owners.html", owners=owners)
+
+
+@app.route("/owners/new", methods=["GET", "POST"])
+@login_required
+def new_owner():
+    if request.method == "POST":
+        name = request.form.get("owner_name", "").strip()
+        email = request.form.get("owner_email", "").strip()
+        
+        if not name or not email:
+            flash('Name and email are required.', 'error')
+            return render_template("owner_new.html")
+        
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO internal_owners (OwnerName, OwnerEmail) VALUES (?, ?)", (name, email))
+        conn.commit()
+        conn.close()
+        
+        flash('Internal owner created.', 'success')
+        return redirect(url_for("list_owners"))
+    
+    return render_template("owner_new.html")
+
+
+@app.route("/owners/<int:owner_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_owner(owner_id):
+    conn = get_db()
+    cur = conn.cursor()
+    
+    if request.method == "POST":
+        name = request.form.get("owner_name", "").strip()
+        email = request.form.get("owner_email", "").strip()
+        
+        cur.execute("UPDATE internal_owners SET OwnerName = ?, OwnerEmail = ? WHERE OwnerID = ?",
+                   (name, email, owner_id))
+        conn.commit()
+        conn.close()
+        
+        flash('Owner updated.', 'success')
+        return redirect(url_for("list_owners"))
+    
+    cur.execute("SELECT * FROM internal_owners WHERE OwnerID = ?", (owner_id,))
+    owner = cur.fetchone()
+    conn.close()
+    
+    if not owner:
+        flash('Owner not found.', 'error')
+        return redirect(url_for("list_owners"))
+    
+    return render_template("owner_edit.html", owner=owner)
+
+
+@app.route("/owners/<int:owner_id>/delete", methods=["POST"])
+@login_required
+def delete_owner(owner_id):
+    conn = get_db()
+    cur = conn.cursor()
+    
+    cur.execute("SELECT COUNT(*) FROM rmas WHERE InternalOwnerID = ?", (owner_id,))
+    if cur.fetchone()[0] > 0:
+        conn.close()
+        flash('Cannot delete owner with existing RMAs.', 'error')
+        return redirect(url_for("list_owners"))
+    
+    cur.execute("DELETE FROM internal_owners WHERE OwnerID = ?", (owner_id,))
+    conn.commit()
+    conn.close()
+    
+    flash('Owner deleted.', 'info')
+    return redirect(url_for("list_owners"))
+
+
+# ============ CONTEXT PROCESSOR ============
+
+@app.context_processor
+def inject_user():
+    return dict(current_user=get_current_user())
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
+

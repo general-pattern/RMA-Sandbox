@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h2>Metrics & Analytics</h2>
+  <div class="filter-actions">
+    <a href="{{ url_for('metrics', week='all') }}" class="btn-secondary {% if week == 'all' %}btn-primary{% endif %}">All Time</a>
+    <a href="{{ url_for('metrics', week='this_week') }}" class="btn-secondary {% if week == 'this_week' %}btn-primary{% endif %}">This Week</a>
+    <a href="{{ url_for('metrics', week='last_week') }}" class="btn-secondary {% if week == 'last_week' %}btn-primary{% endif %}">Last Week</a>
+    <a href="{{ url_for('metrics', week='last_4_weeks') }}" class="btn-secondary {% if week == 'last_4_weeks' %}btn-primary{% endif %}">Last 4 Weeks</a>
+  </div>
+</div>
+
+<p style="color: var(--gray-500); margin-bottom: 20px;">Showing data for: <strong>{{ week_label }}</strong></p>
+
+<!-- Summary Stats -->
+<div class="stats-grid" style="margin-bottom: 30px;">
+  <div class="stat-card stat-total">
+    <div class="stat-number">{{ total_rmas }}</div>
+    <div class="stat-label">Total RMAs</div>
+  </div>
+  
+  <div class="stat-card stat-pending">
+    <div class="stat-number">{% if avg_days_to_close %}{{ avg_days_to_close }}{% else %}-{% endif %}</div>
+    <div class="stat-label">Avg Days to Close</div>
+  </div>
+  
+  <a href="{{ url_for('list_rmas', credit_approved='1') }}" class="stat-card stat-open" style="text-decoration: none; cursor: pointer;">
+    <div class="stat-number">{{ credit_approved_count }}</div>
+    <div class="stat-label">Credits Approved</div>
+  </a>
+  
+  <a href="{{ url_for('list_rmas', return_type='Credit') }}" class="stat-card stat-info" style="text-decoration: none; cursor: pointer;">
+    <div class="stat-number">{{ credit_requested_count }}</div>
+    <div class="stat-label">Credits Pending</div>
+  </a>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
+  
+  <!-- Status Breakdown -->
+  <div class="card">
+    <div class="card-header">
+      <h3>Status Breakdown</h3>
+    </div>
+    {% if status_breakdown %}
+    <table class="clickable-table">
+      <thead>
+        <tr><th>Status</th><th>Count</th></tr>
+      </thead>
+      <tbody>
+        {% for s in status_breakdown %}
+        <tr onclick="window.location='{{ url_for('list_rmas', status=s['status']) }}';" style="cursor: pointer;">
+          <td>
+            <span class="status-badge status-{{ s['status']|lower|replace(' ', '-') }}">
+              {{ s['status'] }}
+            </span>
+          </td>
+          <td><strong>{{ s['count'] }}</strong></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><p>No data</p></div>
+    {% endif %}
+  </div>
+  
+  <!-- Return Type Breakdown -->
+  <div class="card">
+    <div class="card-header">
+      <h3>Return Type Breakdown</h3>
+    </div>
+    {% if return_type_breakdown %}
+    <table class="clickable-table">
+      <thead>
+        <tr><th>Return Type</th><th>Count</th></tr>
+      </thead>
+      <tbody>
+        {% for rt in return_type_breakdown %}
+        <tr onclick="window.location='{{ url_for('list_rmas', return_type=rt['return_type']) }}';" style="cursor: pointer;">
+          <td>{{ rt['return_type'] }}</td>
+          <td><strong>{{ rt['count'] }}</strong></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><p>No data</p></div>
+    {% endif %}
+  </div>
+  
+  <!-- Disposition Breakdown -->
+  <div class="card">
+    <div class="card-header">
+      <h3>Disposition Breakdown</h3>
+    </div>
+    {% if disposition_breakdown %}
+    <table class="clickable-table">
+      <thead>
+        <tr><th>Disposition</th><th>Count</th></tr>
+      </thead>
+      <tbody>
+        {# Each specific disposition row is clickable and filters list_rmas #}
+        {% for d in disposition_breakdown %}
+        <tr onclick="window.location='{{ url_for('list_rmas', disposition=d['disposition']) }}';"
+            style="cursor: pointer;">
+          <td><span class="disposition-badge">{{ d['disposition'] }}</span></td>
+          <td><strong>{{ d['count'] }}</strong></td>
+        </tr>
+        {% endfor %}
+
+        {# Optional: summary rows also clickable #}
+        <tr style="border-top: 2px solid var(--gray-300); cursor:pointer;"
+            onclick="window.location='{{ url_for('list_rmas', has_disposition=1) }}';">
+          <td><em>With Dispositions</em></td>
+          <td><strong>{{ rmas_with_dispositions }}</strong></td>
+        </tr>
+        <tr style="cursor:pointer;"
+            onclick="window.location='{{ url_for('list_rmas', has_disposition=0) }}';">
+          <td><em>Without Dispositions</em></td>
+          <td><strong>{{ rmas_without_dispositions }}</strong></td>
+        </tr>
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><p>No dispositions recorded</p></div>
+    {% endif %}
+  </div>
+
+  
+  <!-- Top Customers -->
+  <div class="card">
+    <div class="card-header">
+      <h3>Top Customers by RMA Count</h3>
+    </div>
+    {% if top_customers %}
+    <table class="clickable-table">
+      <thead>
+        <tr><th>Customer</th><th>RMAs</th></tr>
+      </thead>
+      <tbody>
+        {% for c in top_customers %}
+        <tr onclick="window.location='{{ url_for('list_rmas', customer_id=c['customer_id']) }}';" style="cursor: pointer;">
+          <td>{{ c['customer_name'] }}</td>
+          <td><strong>{{ c['rma_count'] }}</strong></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><p>No data</p></div>
+    {% endif %}
+  </div>
+  
+</div>
+
+<!-- Owner Workload (full width) -->
+<div class="card" style="margin-top: 20px;">
+  <div class="card-header">
+    <h3>Owner Workload</h3>
+  </div>
+  {% if owner_workload %}
+  <table class="clickable-table">
+    <thead>
+      <tr><th>Owner</th><th>Total RMAs</th><th>Active RMAs</th></tr>
+    </thead>
+    <tbody>
+      {% for o in owner_workload %}
+      <tr onclick="window.location='{{ url_for('list_rmas', owner_id=o['OwnerID']) }}';" style="cursor: pointer;">
+        <td>{{ o['OwnerName'] }}</td>
+        <td><strong>{{ o['total'] or 0 }}</strong></td>
+        <td>
+          {% if o['active'] %}
+          <span class="status-badge status-open">{{ o['active'] }}</span>
+          {% else %}
+          0
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><p>No data</p></div>
+  {% endif %}
+</div>
+
+{% endblock %}

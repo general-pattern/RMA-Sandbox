@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h2>➕ Add New User</h2>
+  <p style="color: var(--gray-600); margin: 5px 0 0 0;">Create a new user account (Admin only)</p>
+</div>
+
+<div class="card" style="max-width: 600px;">
+  <form method="post">
+    <div class="form-group">
+      <label for="full_name">Full Name</label>
+      <input type="text" id="full_name" name="full_name" required autofocus>
+    </div>
+    
+    <div class="form-group">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" required>
+    </div>
+    
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" required>
+      <small>Username for logging in</small>
+    </div>
+    
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" required minlength="6">
+      <small>At least 6 characters</small>
+    </div>
+    
+    <div class="form-group">
+      <label for="confirm_password">Confirm Password</label>
+      <input type="password" id="confirm_password" name="confirm_password" required>
+    </div>
+    
+    <div class="form-group">
+      <label for="role">User Role</label>
+      <select id="role" name="role" required>
+        <option value="user" selected>User (Standard Access)</option>
+        <option value="admin">Admin (Full Access)</option>
+      </select>
+      <small>Admins can manage users and have full system access</small>
+    </div>
+    
+    
+    <div style="margin-top: 30px; display: flex; gap: 10px;">
+      <button type="submit" class="btn-primary">✓ Create User</button>
+      <a href="{{ url_for('admin_users') }}" class="btn-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+
+{% endblock %}

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h2>Users</h2>
+</div>
+
+<div class="card">
+  {% if users %}
+  <table>
+    <thead>
+      <tr>
+        <th>Username</th>
+        <th>Full Name</th>
+        <th>Email</th>
+        <th>Role</th>
+        <th>Created</th>
+        <th>Last Login</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u['username'] }}</td>
+        <td>{{ u['full_name'] }}</td>
+        <td>{{ u['email'] }}</td>
+        <td>{{ u['role'] or 'user' }}</td>
+        <td>{{ u['created_on'] or '-' }}</td>
+        <td>{{ u['last_login'] or '-' }}</td>
+        <td>
+          <a href="{{ url_for('edit_user', user_id=u['user_id']) }}" class="btn-sm btn-secondary">
+            Edit
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <div class="empty-state">
+      <p>No users found.</p>
+    </div>
+  {% endif %}
+</div>
+
+{% endblock %}

@@ -1,0 +1,77 @@
+# SIMPLE DEPLOYMENT GUIDE
+
+## What Changed
+
+✅ Customer date opened field (optional date on RMA form)
+✅ Alarm clock notifications (pick days + time)  
+✅ Dual time tracking (system time vs customer time)
+✅ ➕ New RMA button on dashboard
+✅ Cleaner RMA list layout
+
+---
+
+## Files to Replace
+
+Replace these 6 files on your server:
+
+1. **app.py** - Updated queries
+2. **schema.sql** - Updated schema
+3. **templates/dashboard.html** - New button + dual time tracking
+4. **templates/rma_detail.html** - Dual time tracking
+5. **templates/rma_new.html** - Customer date field
+6. **templates/notifications.html** - Weekly schedule picker
+
+---
+
+## Deployment Steps
+
+### Step 1: Run Migration (IMPORTANT - DO THIS FIRST!)
+```bash
+python migrate_notifications_and_date.py
+```
+
+### Step 2: Replace Files
+Upload and replace the 6 files above.
+
+### Step 3: Restart
+Restart your application.
+
+---
+
+## What You'll See
+
+### Dashboard Header:
+```
+📋 My Dashboard                    [➕ New RMA]
+```
+
+### Each RMA Shows Two Times:
+```
+┌──────────────────────┬──────────────────────┐
+│ ⏱️ In Our System    │ 📅 Customer RMA Age  │
+│ 5 days               │ 12 days              │
+│ Since Mar 1, 2024    │ Opened Feb 18, 2024  │
+└──────────────────────┴──────────────────────┘
+```
+
+### Notification Preferences:
+```
+Days: ☑ Mon  ☑ Wed  ☑ Fri
+Time: [09:00]
+Age:  [7] days
+```
+
+---
+
+## Testing
+
+After deployment:
+- [ ] Click "New RMA" button on dashboard
+- [ ] Create RMA with customer date
+- [ ] View dashboard - see dual time tracking
+- [ ] Update notification preferences
+- [ ] View an RMA detail page
+
+---
+
+That's it! Just run migration, replace 6 files, and restart.

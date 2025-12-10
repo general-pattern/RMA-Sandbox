@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h2>Create New RMA</h2>
+</div>
+
+<div class="card form-card">
+  <form method="post">
+    <div class="form-section">
+      <h3>RMA Details</h3>
+      
+      <div class="form-row">
+        <div class="form-group">
+          <label for="customer_id">Customer <span class="required">*</span></label>
+          <select name="customer_id" id="customer_id" required>
+            <option value="">-- Select Customer --</option>
+            {% for c in customers %}
+            <option value="{{ c['customer_id'] }}">{{ c['customer_name'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label for="return_type">Return Type</label>
+          <select name="return_type" id="return_type">
+            <option value="TBD">TBD</option>
+            <option value="Credit">Credit</option>
+            <option value="Replacement">Replacement</option>
+            <option value="Repair and Return">Repair and Return</option>
+          </select>
+        </div>
+      </div>
+      
+      <div class="form-row">
+        <div class="form-group">
+          <label for="customer_date_opened">Date Customer Opened RMA</label>
+          <input type="date" name="customer_date_opened" id="customer_date_opened">
+          <small style="color: var(--gray-600);">Optional: When did the customer originally open this RMA?</small>
+        </div>
+      </div>
+      
+      <div class="form-group">
+  <label>Internal Owners</label>
+  <div style="border: 1px solid var(--gray-300); border-radius: 6px; padding: 15px; max-height: 200px; overflow-y: auto;">
+    {% for o in owners %}
+    <label style="display: flex; align-items: center; padding: 8px; cursor: pointer; border-radius: 4px; transition: background-color 0.15s;"
+           onmouseover="this.style.backgroundColor='var(--gray-50)'" 
+           onmouseout="this.style.backgroundColor='transparent'">
+      <input type="checkbox" name="owner_ids" value="{{ o['user_id'] }}" 
+             style="width: auto; margin-right: 10px;">
+      <span>{{ o['full_name'] }}</span>
+    </label>
+    {% endfor %}
+  </div>
+  <small>Select all owners who should be assigned to this RMA. They will receive email notifications.</small>
+</div>
+    
+    <div class="form-section">
+      <h3>Customer Complaint</h3>
+      <div class="form-group">
+        <textarea name="complaint" id="complaint" rows="5" placeholder="Describe the customer's complaint or issue..."></textarea>
+      </div>
+    </div>
+    
+    <div class="form-section">
+      <h3>Internal Notes</h3>
+      <div class="form-group">
+        <textarea name="internal_notes" id="internal_notes" rows="3" placeholder="Add any internal notes (optional)..."></textarea>
+      </div>
+    </div>
+    
+    <div class="form-actions">
+      <button type="submit" class="btn-primary">Create RMA</button>
+      <a href="{{ url_for('list_rmas') }}" class="btn-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+
+{% endblock %}
